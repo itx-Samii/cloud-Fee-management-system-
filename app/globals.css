@@ -318,7 +318,6 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
     height: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    overflow: hidden !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -334,7 +333,6 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
   .print-only { 
     display: block !important; 
     width: 100% !important;
-    overflow: hidden !important;
   }
   
   .print-container {
@@ -342,7 +340,6 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
     max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    overflow: hidden !important;
   }
 
   .voucher-card {

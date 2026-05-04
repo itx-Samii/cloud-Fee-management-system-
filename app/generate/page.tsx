@@ -104,8 +104,33 @@ export default function GenerateFees() {
     return matchesSearch && matchesClass;
   });
 
-  const handlePrintBulk = () => {
-    setPrintTargetId(-1); // -1 means print all filtered
+  const handlePrintBulk = async () => {
+    if (filteredFees.length === 0) {
+      const confirmGen = confirm("No vouchers found for this month/class. Do you want to generate them now?");
+      if (!confirmGen) return;
+      
+      setIsGenerating(true);
+      try {
+        const res = await fetch('/api/fees', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ month: genMonth, year: genYear, classId: classes.find(c => c.name === selectedClass)?.id || 'all' })
+        });
+        if (res.ok) {
+          await fetchMonthFees(genMonth, genYear);
+          // Small delay to allow state to update before printing
+          setTimeout(() => {
+            setPrintTargetId(-1);
+            setTimeout(() => window.print(), 300);
+          }, 500);
+        }
+      } finally {
+        setIsGenerating(false);
+      }
+      return;
+    }
+
+    setPrintTargetId(-1);
     setTimeout(() => {
       window.print();
     }, 200);
@@ -143,9 +168,9 @@ export default function GenerateFees() {
             className="btn btn-primary" 
             style={{height: '42px', padding: '0 1.5rem', fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}
             onClick={handlePrintBulk}
-            disabled={filteredFees.length === 0}
+            disabled={isGenerating}
           >
-            <span>🖨️</span> Print Class Challans ({filteredFees.length})
+            <span>🖨️</span> {isGenerating ? 'Processing...' : `Print Class Challans (${filteredFees.length})`}
           </button>
           <input 
             type="text" 
