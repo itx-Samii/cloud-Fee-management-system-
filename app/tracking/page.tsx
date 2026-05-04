@@ -203,11 +203,19 @@ export default function ClassWiseTracking() {
                      onChange={e => {
                         const file = e.target.files?.[0];
                         if (file) {
+                          if (file.size > 2 * 1024 * 1024) {
+                            alert('Logo image is too large. Please select an image under 2MB.');
+                            return;
+                          }
                           const reader = new FileReader();
                           reader.onload = (ev) => {
                             const res = ev.target?.result as string;
                             setLogo(res);
-                            localStorage.setItem('fms-school-logo', res);
+                            try {
+                              localStorage.setItem('fms-school-logo', res);
+                            } catch (storageErr) {
+                              alert('Logo is too large to save locally. Please use a smaller image (under 2MB).');
+                            }
                           };
                           reader.readAsDataURL(file);
                         }
@@ -242,7 +250,7 @@ export default function ClassWiseTracking() {
         <div style={{flex: 1}}>
           <label className="form-label">Year</label>
           <select className="form-input" value={year} onChange={e => setYear(e.target.value)}>
-            {["2025", "2026", "2027"].map(y => <option key={y} value={y}>{y}</option>)}
+            {Array.from({length: 5}, (_, i) => (new Date().getFullYear() - 2 + i).toString()).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div style={{flex: 1}}>
@@ -273,6 +281,7 @@ export default function ClassWiseTracking() {
           <thead>
             <tr>
               <th style={{width: '80px'}}>Sr No</th>
+              <th>Adm No</th>
               <th>Student & Father Name</th>
               <th>Net Due</th>
               <th>Status</th>
@@ -290,6 +299,7 @@ export default function ClassWiseTracking() {
                 .map((d, idx) => (
                 <tr key={d.id} style={{background: (d.status === 'Unpaid' || d.status === 'Not Generated') ? 'rgba(239, 68, 68, 0.05)' : 'transparent'}}>
                   <td style={{color: 'var(--text-muted)'}}>#{idx + 1}</td>
+                  <td style={{fontWeight: 700}}>{d.admissionNumber || 'N/A'}</td>
                   <td>
                     <div style={{fontWeight: 600}}>{d.studentName}</div>
                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>S/O: {d.fatherName || 'N/A'}</div>
@@ -317,6 +327,21 @@ export default function ClassWiseTracking() {
                       >
                         Print Challan
                       </button>
+                      {d.voucherId && (
+                        <button 
+                          className="btn" 
+                          style={{padding: '0.35rem 0.8rem', fontSize: '0.75rem', background: '#e11d48', color: 'white', border: 'none'}}
+                          onClick={async () => {
+                            if(confirm(`Are you sure you want to REVERSE/DELETE this voucher #${d.voucherId}?`)) {
+                              const res = await fetch(`/api/fees?id=${d.voucherId}`, { method: 'DELETE' });
+                              if(res.ok) fetchTracking();
+                              else alert("Failed to reverse.");
+                            }
+                          }}
+                        >
+                          Reverse
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -361,108 +386,74 @@ export default function ClassWiseTracking() {
         </div>
       )}
 
-      {/* Integrated Print Engine */}
-      <div className="print-only landscape-print">
+      <div className="print-only">
         {trackingData.filter(d => d.voucherId === printTargetId).map(f => (
-          <div key={f.id} className="voucher-card" style={{
-            breakAfter: 'page', 
-            padding: '2mm 0'
-          }}>
-            <div style={{
-              display: 'flex', 
-              flexDirection: 'row',
-              background: 'white', 
-              color: 'black', 
-              padding: '0.5rem', 
-              border: '2px solid #000',
-              flex: 1,
-              width: '100%',
-              minHeight: '190mm'
-            }}>
-              {['Bank Copy', 'School Copy', 'Student Copy'].map((copy, i) => (
-                <div key={copy} style={{
-                  flex: '1', 
-                  padding: '1rem', 
-                  borderRight: i < 2 ? '2px dashed #000' : 'none', 
-                  color: '#000',
-                  display: 'flex',
-                  flexDirection: 'column'
-                }}>
-                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', textAlign: 'center'}}>
-                    {logo && <img src={logo} alt="Logo" style={{width: '70px', height: '70px', objectFit: 'contain', marginRight: '10px'}} />}
-                    <div>
-                      <h2 style={{fontWeight: 900, margin: 0, textTransform: 'uppercase', color: '#000', fontSize: '1rem', letterSpacing: '0.5px'}}>{schoolName}</h2>
-                      <div style={{
-                        fontSize: '0.75rem', 
-                        fontWeight: 700, 
-                        marginTop: '0.3rem', 
-                        padding: '0.15rem 0.5rem', 
-                        border: '1px solid #000', 
-                        background: '#eee',
-                        color: '#000', 
-                        textAlign: 'center',
-                        display: 'inline-block'
-                      }}>{copy}</div>
-                    </div>
+          <div key={f.id} className="voucher-card">
+            {['Bank Copy', 'School Copy', 'Student Copy'].map((copy, i) => (
+              <div key={copy} className="voucher-copy" style={{
+                borderRight: i < 2 ? '1.5px dashed #999' : 'none',
+                color: '#000',
+                background: '#fff'
+              }}>
+                {/* TOP: Header + Student Info */}
+                <div>
+                  {/* Header */}
+                  <div style={{display: 'flex', alignItems: 'center', gap: '3mm', marginBottom: '5mm'}}>
+                     {logo && <img src={logo} alt="Logo" style={{width: '44px', height: '44px', objectFit: 'contain'}} />}
+                     <div>
+                        <h3 style={{fontSize: '11pt', fontWeight: 900, margin: 0, textTransform: 'uppercase', color: '#000'}}>{schoolName}</h3>
+                        <p style={{fontSize: '7pt', margin: '1mm 0 2mm 0', fontWeight: 600, color: '#333'}}>Rawalpindi, Pakistan</p>
+                        <div style={{display: 'inline-block', padding: '0.5mm 3mm', border: '1px solid #000', fontSize: '8pt', fontWeight: 800, textTransform: 'uppercase'}}>{copy}</div>
+                     </div>
                   </div>
-                  
-                  <div style={{fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: '0.2rem'}}>
-                    <strong>Voucher No:</strong> <span style={{fontWeight: 800}}>#{f.voucherId}</span>
-                  </div>
-                  <div style={{fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: '0.2rem'}}>
-                    <strong>Month:</strong> <span style={{fontWeight: 600}}>{f.month} {f.year}</span>
-                  </div>
-                  <div style={{fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: '0.2rem'}}>
-                    <strong>Name:</strong> <span style={{fontWeight: 600}}>{f.studentName}</span>
-                  </div>
-                  <div style={{fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: '0.2rem'}}>
-                    <strong>Father:</strong> <span style={{fontWeight: 600}}>{f.fatherName}</span>
-                  </div>
-                  <div style={{fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: '0.2rem'}}>
-                    <strong>Class:</strong> <span style={{fontWeight: 800}}>{f.className}</span>
-                  </div>
-                  
-                  <div style={{marginTop: 'auto'}}>
-                    <div style={{borderTop: '2px solid #000', margin: '0.75rem 0'}}></div>
 
-                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem'}}>
-                      <span>Tuition Fee</span>
-                      <span style={{fontWeight: 600}}>Rs. {f.baseAmount}</span>
-                    </div>
-                    
-                    {f.discount > 0 && (
-                      <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#dc2626'}}>
-                        <span>Fee Discount</span>
-                        <span style={{fontWeight: 600}}>- Rs. {f.discount}</span>
-                      </div>
-                    )}
-                    
-                    {f.remainingAnnualCharges > 0 && (
-                      <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#000', background: '#f0f0f0', padding: '0.3rem 0.2rem'}}>
-                        <strong>Annual Charges Due:</strong>
-                        <strong style={{fontSize: '0.95rem'}}>Rs. {f.remainingAnnualCharges}</strong>
-                      </div>
-                    )}
-
-                    <div style={{borderTop: '2px dashed #000', margin: '0.75rem 0'}}></div>
-
-                    <div style={{display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '1.1rem', background: '#000', color: '#fff', padding: '0.4rem'}}>
-                      <span>NET TOTAL</span>
-                      <span>Rs. {Number(f.amount) + Number(f.remainingAnnualCharges || 0)}</span>
-                    </div>
-                    
-                    <div style={{marginTop: '3.5rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: 700}}>
-                      <div style={{borderTop: '1.5px solid black', width: '45%', textAlign: 'center', paddingTop: '0.4rem'}}>Cashier Signature</div>
-                      <div style={{borderTop: '1.5px solid black', width: '45%', textAlign: 'center', paddingTop: '0.4rem'}}>Authorized Officer</div>
-                    </div>
-
-                    <div style={{marginTop: '1.5rem', textAlign: 'center', fontSize: '0.6rem', color: '#666', fontStyle: 'italic'}}>
-                      Note: Please pay before 10th of every month.
-                    </div>
+                  {/* Student Info */}
+                  <div style={{fontSize: '9pt', marginTop: '3mm'}}>
+                     {[
+                       ['Voucher No:', `#${f.voucherId}`],
+                       ['Adm No:', f.admissionNumber || 'N/A'],
+                       ['Month:', `${f.month} ${f.year}`],
+                       ['Student Name:', f.studentName],
+                       ['Father Name:', f.fatherName],
+                       ['Class / Section:', f.className]
+                     ].map(([label, value]) => (
+                       <div key={label} style={{display: 'flex', justifyContent: 'space-between', marginBottom: '2.5mm', borderBottom: '0.5px solid #ddd', paddingBottom: '1mm'}}>
+                          <strong>{label}</strong>
+                          <span style={{fontWeight: 500}}>{value}</span>
+                       </div>
+                     ))}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                {/* BOTTOM: Fees + Signatures */}
+                <div>
+                   <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', marginBottom: '2mm'}}>
+                      <span>Tuition Fee</span>
+                      <span>Rs. {f.baseAmount}</span>
+                   </div>
+                   {f.discount > 0 && (
+                      <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', color: '#e11d48', marginBottom: '2mm'}}>
+                         <strong>Discount</strong>
+                         <strong>- Rs. {f.discount}</strong>
+                      </div>
+                   )}
+                   {f.remainingAnnualCharges > 0 && (
+                      <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', background: '#fff7ed', padding: '1mm 2mm', marginBottom: '2mm'}}>
+                         <strong>O/S Annual</strong>
+                         <strong>Rs. {f.remainingAnnualCharges}</strong>
+                      </div>
+                   )}
+                   <div style={{background: '#000', color: '#fff', padding: '2.5mm 3mm', display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '12pt', marginTop: '2mm'}}>
+                      <span>TOTAL</span>
+                      <span>Rs. {Number(f.amount) + Number(f.remainingAnnualCharges || 0)}</span>
+                   </div>
+                   <div style={{marginTop: '8mm', display: 'flex', justifyContent: 'space-between', fontSize: '8pt', fontWeight: 700}}>
+                      <div style={{width: '40%', borderTop: '1px solid #555', textAlign: 'center', paddingTop: '1.5mm'}}>Cashier</div>
+                      <div style={{width: '40%', borderTop: '1px solid #555', textAlign: 'center', paddingTop: '1.5mm'}}>Officer</div>
+                   </div>
+                </div>
+              </div>
+            ))}
           </div>
         ))}
       </div>

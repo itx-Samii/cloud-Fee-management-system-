@@ -19,10 +19,47 @@ export default function GenerateFees() {
   const currentMonth = new Date().toLocaleString('default', { month: 'long' });
   const currentYear = new Date().getFullYear().toString();
 
-  const fetchMonthFees = async () => {
-    const res = await fetch(`/api/fees?month=${currentMonth}&year=${currentYear}`, { cache: 'no-store' });
+  const fetchMonthFees = async (m = currentMonth, y = currentYear) => {
+    const res = await fetch(`/api/fees?month=${m}&year=${y}`, { cache: 'no-store' });
     const data = await res.json();
     setFees(data || []);
+  };
+
+  const [classes, setClasses] = useState<any[]>([]);
+  const fetchClasses = async () => {
+    try {
+      const res = await fetch('/api/classes');
+      const data = await res.json();
+      setClasses(data || []);
+    } catch {
+      console.error("Failed to fetch classes");
+    }
+  };
+
+  const [genMonth, setGenMonth] = useState(currentMonth);
+  const [genYear, setGenYear] = useState(currentYear);
+  const [genClassId, setGenClassId] = useState('all');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleBulkGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsGenerating(true);
+    try {
+      const res = await fetch('/api/fees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: genMonth, year: genYear, classId: genClassId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Successfully generated ${data.count} new vouchers for ${genMonth} ${genYear}`);
+        fetchMonthFees(genMonth, genYear);
+      } else {
+        alert(data.error || "Generation failed");
+      }
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   useEffect(() => {
@@ -30,6 +67,7 @@ export default function GenerateFees() {
     setSchoolName(localStorage.getItem('fms-school-name') || 'YOUR SCHOOL NAME');
     setLogo(localStorage.getItem('fms-school-logo') || '');
     fetchMonthFees();
+    fetchClasses();
   }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -56,11 +94,22 @@ export default function GenerateFees() {
   };
 
 
-  const filteredFees = fees.filter(f => 
-    f.studentName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    f.fatherName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    f.id.toString() === searchQuery
-  );
+  const [selectedClass, setSelectedClass] = useState('all');
+
+  const filteredFees = fees.filter(f => {
+    const matchesSearch = f.studentName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         f.fatherName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         f.id.toString() === searchQuery;
+    const matchesClass = selectedClass === 'all' || f.className?.includes(selectedClass);
+    return matchesSearch && matchesClass;
+  });
+
+  const handlePrintBulk = () => {
+    setPrintTargetId(-1); // -1 means print all filtered
+    setTimeout(() => {
+      window.print();
+    }, 200);
+  };
 
   const calculateTotal = () => filteredFees.reduce((acc, curr) => acc + (curr.amount || 0), 0);
 
@@ -71,15 +120,63 @@ export default function GenerateFees() {
           <h1>Print Student Challans</h1>
           <p>Search and print dynamic fee vouchers for {currentMonth} {currentYear}.</p>
         </div>
+        <div className="glass-panel" style={{padding: '1rem', border: '1px solid var(--primary)'}}>
+          <form onSubmit={handleBulkGenerate} style={{display: 'flex', gap: '0.5rem', alignItems: 'flex-end'}}>
+             <div>
+               <label className="form-label" style={{fontSize: '0.7rem'}}>Billing Month</label>
+               <select className="form-input" style={{padding: '0.4rem', fontSize: '0.8rem'}} value={genMonth} onChange={e => setGenMonth(e.target.value)}>
+                 {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => <option key={m} value={m}>{m}</option>)}
+               </select>
+             </div>
+             <div>
+               <label className="form-label" style={{fontSize: '0.7rem'}}>Year</label>
+               <select className="form-input" style={{padding: '0.4rem', fontSize: '0.8rem'}} value={genYear} onChange={e => setGenYear(e.target.value)}>
+                 {Array.from({length: 5}, (_, i) => (new Date().getFullYear() - 2 + i).toString()).map(y => <option key={y} value={y}>{y}</option>)}
+               </select>
+             </div>
+             <div>
+               <label className="form-label" style={{fontSize: '0.7rem'}}>Class</label>
+               <select className="form-input" style={{padding: '0.4rem', fontSize: '0.8rem'}} value={genClassId} onChange={e => setGenClassId(e.target.value)}>
+                 <option value="all">All Classes</option>
+                 {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.section ? `- ${c.section}` : ''}</option>)}
+               </select>
+             </div>
+             <button type="submit" className="btn btn-primary" disabled={isGenerating} style={{padding: '0.5rem 1rem', fontSize: '0.85rem'}}>
+               {isGenerating ? 'Generating...' : 'Bulk Generate Vouchers'}
+             </button>
+          </form>
+        </div>
       </div>
 
-      <div className="no-print" style={{marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-        <h2>Active Vouchers: {filteredFees.length} | Expected Total: Rs. {calculateTotal()}</h2>
+      <div className="no-print" style={{marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap'}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: '1.5rem'}}>
+          <h2 style={{margin: 0}}>Active Vouchers: {filteredFees.length}</h2>
+          <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+            <label style={{fontSize: '0.9rem', fontWeight: 600}}>Filter Class:</label>
+            <select 
+              className="form-input" 
+              style={{padding: '0.3rem 0.6rem', fontSize: '0.9rem', minWidth: '150px'}}
+              value={selectedClass}
+              onChange={e => setSelectedClass(e.target.value)}
+            >
+              <option value="all">All Classes</option>
+              {classes.map(c => <option key={c.id} value={c.name}>{c.name} {c.section ? `- ${c.section}` : ''}</option>)}
+            </select>
+          </div>
+          <button 
+            className="btn btn-success" 
+            style={{padding: '0.4rem 1.2rem', fontWeight: 700}}
+            onClick={handlePrintBulk}
+            disabled={filteredFees.length === 0}
+          >
+            Print All Filtered ({filteredFees.length})
+          </button>
+        </div>
         <input 
           type="text" 
           placeholder="Search Name or Father's Name..." 
           className="form-input" 
-          style={{maxWidth: '350px'}}
+          style={{maxWidth: '300px'}}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
@@ -87,7 +184,7 @@ export default function GenerateFees() {
 
       {filteredFees.length === 0 ? (
         <div className="glass-panel no-print" style={{padding: '4rem', textAlign: 'center'}}>
-          <h3 style={{color: 'var(--text-muted)'}}>{fees.length > 0 ? "No vouchers match your search." : "No vouchers generated for this billing cycle yet."}</h3>
+          <h3 style={{color: 'var(--text-muted)'}}>{fees.length > 0 ? "No vouchers match your filters." : "No vouchers generated for this billing cycle yet."}</h3>
         </div>
       ) : (
         <>
@@ -102,6 +199,7 @@ export default function GenerateFees() {
               <thead>
                 <tr>
                   <th style={{width: '80px'}}>Sr No</th>
+                  <th>Adm No</th>
                   <th>Student & Father Name</th>
                   <th>Class</th>
                   <th>Month</th>
@@ -114,6 +212,7 @@ export default function GenerateFees() {
                 {filteredFees.map((f, idx) => (
                   <tr key={f.id}>
                     <td style={{color: 'var(--text-muted)'}}>#{idx + 1}</td>
+                    <td style={{fontWeight: 700}}>{f.admissionNumber || 'N/A'}</td>
                     <td>
                       <div style={{fontWeight: 'bold'}}>{f.studentName}</div>
                       <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>S/O: {f.fatherName}</div>
@@ -123,13 +222,32 @@ export default function GenerateFees() {
                     <td>Rs. {f.amount}</td>
                     <td><span className={`badge ${f.status === 'Paid' ? 'badge-success' : 'badge-warning'}`}>{f.status}</span></td>
                     <td>
-                      <button 
-                         className="btn btn-primary" 
-                         style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem'}}
-                         onClick={() => handlePrintIndividual(f.id)}
-                      >
-                         Print Challan
-                      </button>
+                      <div style={{display: 'flex', gap: '0.4rem'}}>
+                        <button 
+                           className="btn btn-primary" 
+                           style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem'}}
+                           onClick={() => handlePrintIndividual(f.id)}
+                        >
+                           Print
+                        </button>
+                        <button 
+                           className="btn" 
+                           style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem', background: '#e11d48', color: 'white', border: 'none'}}
+                           onClick={async () => {
+                             if(confirm(`Are you sure you want to REVERSE voucher #${f.id} for ${f.studentName}? This will undo any payment.`)) {
+                               const res = await fetch(`/api/fees?id=${f.id}`, { method: 'DELETE' });
+                               if(res.ok) {
+                                 alert('Fee reversed successfully.');
+                                 fetchMonthFees(genMonth, genYear);
+                               } else {
+                                 alert('Failed to reverse fee.');
+                               }
+                             }
+                           }}
+                        >
+                           Reverse
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -138,82 +256,73 @@ export default function GenerateFees() {
           </div>
 
           <div className="print-container print-only">
-            {(printTargetId ? filteredFees.filter(f => f.id === printTargetId) : []).map(f => (
-              <div key={f.id} className="voucher-card" style={{breakAfter: 'page', marginBottom: '2rem'}}>
-                <div style={{display: 'flex', justifyContent: 'space-between', background: 'white', color: 'black', padding: '1rem', border: '1px solid #000'}}>
-                  {['Bank Copy', 'School Copy', 'Student Copy'].map((copy, i) => (
-                    <div key={copy} style={{flex: '1', padding: '0 1.5rem', borderRight: i < 2 ? '1px dashed #000' : 'none', color: '#000'}}>
-                      <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', textAlign: 'center'}}>
-                        {logo && <img src={logo} alt="Logo" style={{width: '50px', height: '50px', objectFit: 'contain', marginRight: '10px'}} />}
-                        <div>
-                          <h3 
-                            contentEditable suppressContentEditableWarning 
-                            onBlur={handleSaveName}
-                            style={{fontWeight: 800, margin: 0, textTransform: 'uppercase', outline: 'none', borderBottom: '1px dotted transparent', color: '#000'}}
-                            aria-label="Editable School Name"
-                          >
-                            {mounted ? schoolName : 'YOUR SCHOOL NAME'}
-                          </h3>
-                          <p style={{fontSize: '0.8rem', fontWeight: 600, marginTop: '0.25rem', padding: '0.2rem', border: '1px solid #000', color: '#000'}}>{copy}</p>
-                        </div>
+            {(printTargetId === -1 ? filteredFees : (printTargetId ? filteredFees.filter(f => f.id === printTargetId) : [])).map(f => (
+              <div key={f.id} className="voucher-card">
+                {['Bank Copy', 'School Copy', 'Student Copy'].map((copy, i) => (
+                  <div key={copy} className="voucher-copy" style={{
+                    borderRight: i < 2 ? '1.5px dashed #999' : 'none',
+                    color: '#000',
+                    background: '#fff'
+                  }}>
+                    {/* TOP: Header + Student Info */}
+                    <div>
+                      {/* Header */}
+                      <div style={{display: 'flex', alignItems: 'center', gap: '3mm', marginBottom: '5mm'}}>
+                         {logo && <img src={logo} alt="Logo" style={{width: '44px', height: '44px', objectFit: 'contain'}} />}
+                         <div>
+                            <h3 style={{fontSize: '11pt', fontWeight: 900, margin: 0, textTransform: 'uppercase', color: '#000'}}>{schoolName}</h3>
+                            <p style={{fontSize: '7pt', margin: '1mm 0 2mm 0', fontWeight: 600, color: '#333'}}>Rawalpindi, Pakistan</p>
+                            <div style={{display: 'inline-block', padding: '0.5mm 3mm', border: '1px solid #000', fontSize: '8pt', fontWeight: 800, textTransform: 'uppercase'}}>{copy}</div>
+                         </div>
                       </div>
-                      
-                      <div style={{fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between'}}>
-                        <strong>Voucher No:</strong> 
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none'}}>#{f.id}</span>
-                      </div>
-                      <div style={{fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between'}}>
-                        <strong>Month:</strong> 
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none'}}>{f.month} {f.year}</span>
-                      </div>
-                      <div style={{fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between'}}>
-                        <strong>Name:</strong> 
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none'}}>{f.studentName}</span>
-                      </div>
-                      <div style={{fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between'}}>
-                        <strong>Father Name:</strong> 
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none', fontWeight: 600}}>{f.fatherName}</span>
-                      </div>
-                      <div style={{fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between'}}>
-                        <strong>Class:</strong> 
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none', fontWeight: 700}}>{f.className}</span>
-                      </div>
-                      
-                      <div style={{borderTop: '2px solid #000', margin: '1rem 0'}}></div>
 
-                      <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem'}}>
-                        <span>Tuition Fee</span>
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none'}}>Rs. {f.baseAmount || f.amount}</span>
-                      </div>
-                      
-                      {f.discount > 0 && (
-                        <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem'}}>
-                          <span>Discount</span>
-                          <span>- Rs. {f.discount}</span>
-                        </div>
-                      )}
-                      
-                      {f.remainingAnnualCharges > 0 && (
-                        <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#c2410c', background: '#fff7ed', padding: '0.2rem'}}>
-                          <strong>O/S Annual Charges:</strong>
-                          <strong>Rs. {f.remainingAnnualCharges}</strong>
-                        </div>
-                      )}
-
-                      <div style={{borderTop: '2px dashed #000', margin: '1rem 0'}}></div>
-
-                      <div style={{display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem'}}>
-                        <span>NET AMOUNT</span>
-                        <span contentEditable suppressContentEditableWarning style={{outline: 'none'}}>Rs. {f.amount}</span>
-                      </div>
-                      
-                      <div style={{marginTop: '4rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem'}}>
-                        <div style={{borderTop: '1px solid black', paddingTop: '0.2rem', width: '45%', textAlign: 'center'}}>Cashier Stamp</div>
-                        <div style={{borderTop: '1px solid black', paddingTop: '0.2rem', width: '45%', textAlign: 'center'}}>Officer Sign</div>
+                      {/* Student Info */}
+                      <div style={{fontSize: '9pt', marginTop: '3mm'}}>
+                         {[
+                           ['Voucher No:', `#${f.id}`],
+                           ['Adm No:', f.admissionNumber || 'N/A'],
+                           ['Month:', `${f.month} ${f.year}`],
+                           ['Student Name:', f.studentName],
+                           ['Father Name:', f.fatherName],
+                           ['Class / Section:', f.className]
+                         ].map(([label, value]) => (
+                           <div key={label} style={{display: 'flex', justifyContent: 'space-between', marginBottom: '2.5mm', borderBottom: '0.5px solid #ddd', paddingBottom: '1mm'}}>
+                              <strong>{label}</strong>
+                              <span style={{fontWeight: 500}}>{value}</span>
+                           </div>
+                         ))}
                       </div>
                     </div>
-                  ))}
-                </div>
+
+                    {/* BOTTOM: Fees + Signatures */}
+                    <div>
+                       <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', marginBottom: '2mm'}}>
+                          <span>Tuition Fee</span>
+                          <span>Rs. {f.baseAmount || f.amount}</span>
+                       </div>
+                       {f.discount > 0 && (
+                          <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', color: '#e11d48', marginBottom: '2mm'}}>
+                             <strong>Discount</strong>
+                             <strong>- Rs. {f.discount}</strong>
+                          </div>
+                       )}
+                       {f.remainingAnnualCharges > 0 && (
+                          <div style={{fontSize: '9pt', display: 'flex', justifyContent: 'space-between', background: '#fff7ed', padding: '1mm 2mm', marginBottom: '2mm'}}>
+                             <strong>O/S Annual</strong>
+                             <strong>Rs. {f.remainingAnnualCharges}</strong>
+                          </div>
+                       )}
+                       <div style={{background: '#000', color: '#fff', padding: '2.5mm 3mm', display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '12pt', marginTop: '2mm'}}>
+                          <span>TOTAL</span>
+                          <span>Rs. {Number(f.amount) + Number(f.remainingAnnualCharges || 0)}</span>
+                       </div>
+                       <div style={{marginTop: '8mm', display: 'flex', justifyContent: 'space-between', fontSize: '8pt', fontWeight: 700}}>
+                          <div style={{width: '40%', borderTop: '1px solid #555', textAlign: 'center', paddingTop: '1.5mm'}}>Cashier</div>
+                          <div style={{width: '40%', borderTop: '1px solid #555', textAlign: 'center', paddingTop: '1.5mm'}}>Officer</div>
+                       </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

@@ -194,18 +194,19 @@ export default function Dashboard() {
               <th>Category</th>
               <th>Date</th>
               <th>Amount</th>
+              <th className="no-print">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
                <tr>
-                 <td colSpan={5} style={{textAlign: 'center', padding: '3rem'}}>
-                   <span style={{color: 'var(--text-muted)'}}>Calculating matrices...</span>
+                 <td colSpan={6} style={{textAlign: 'center', padding: '3rem'}}>
+                   <span style={{color: 'var(--text-muted)'}}>Calculating metrics...</span>
                  </td>
                </tr>
             ) : unifiedLogs.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{textAlign: 'center', padding: '3rem'}}>
+                <td colSpan={6} style={{textAlign: 'center', padding: '3rem'}}>
                   <span style={{color: 'var(--text-muted)'}}>No recent activity found.</span>
                 </td>
               </tr>
@@ -226,6 +227,24 @@ export default function Dashboard() {
                    <td style={{fontWeight: 700, color: log.type === 'INCOME' ? 'var(--success)' : 'var(--danger)'}}>
                       {log.type === 'INCOME' ? '+' : '-'} Rs. {log.amount}
                    </td>
+                   <td className="no-print">
+                      {log.type === 'INCOME' && (
+                        <button 
+                          className="btn" 
+                          style={{padding: '0.2rem 0.5rem', fontSize: '0.7rem', background: '#e11d48', color: 'white', border: 'none'}}
+                          onClick={async () => {
+                            if(confirm(`Are you sure you want to REVERSE this payment of Rs. ${log.amount}?`)) {
+                              const rawId = log.id.replace('fee-', '');
+                              const res = await fetch(`/api/fees?id=${rawId}`, { method: 'DELETE' });
+                              if(res.ok) loadDashboard();
+                              else alert("Failed to reverse.");
+                            }
+                          }}
+                        >
+                          Reverse
+                        </button>
+                      )}
+                    </td>
                  </tr>
                ))
             )}

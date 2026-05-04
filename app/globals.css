@@ -111,6 +111,12 @@ body {
   overflow-x: hidden;
 }
 
+/* Page Transition Animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* User-Friendly Cards */
 .glass-panel {
   background: var(--bg-card);
@@ -301,65 +307,75 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
 }
 @media print {
   @page {
-    size: A4 portrait;
-    margin: 10mm;
+    size: A4 landscape;
+    margin: 0mm;
   }
   
-  /* Named page for Landscape Vouchers */
-  @page landscape-page {
-    size: A4 landscape;
-    margin: 5mm;
-  }
-
-  .landscape-print {
-    page: landscape-page;
-  }
-
   body, html {
     background: white !important;
     color: black !important;
     width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  * {
-    color: black !important;
-    text-shadow: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    transition: none !important;
-    animation: none !important;
-  }
-  .no-print { display: none !important; }
-  .print-only { display: block !important; }
-  
-  .dashboard-layout {
-    display: block !important;
-    background: white !important;
-  }
+
+  .no-print, .sidebar { display: none !important; }
 
   .main-content {
-    display: block !important;
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .print-only { 
+    display: block !important; 
+    width: 100% !important;
+    overflow: hidden !important;
+  }
+  
+  .print-container {
+    width: 100% !important;
+    max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .voucher-card {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
     width: 100% !important;
-    position: static !important;
-    overflow: visible !important;
+    height: 207mm !important;
+    display: flex !important;
+    flex-direction: row !important;
+    overflow: hidden !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+    box-sizing: border-box !important;
   }
-  
-  .glass-panel { 
-    border: 1px solid #000 !important;
-    border-radius: 0 !important;
-    background: white !important;
-    box-shadow: none !important;
+
+  .voucher-copy {
+    flex: 1 1 0% !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 6mm 5mm !important;
   }
-  
-  .badge {
-    border: 1px solid #000 !important;
-    background: white !important;
-    color: black !important;
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 

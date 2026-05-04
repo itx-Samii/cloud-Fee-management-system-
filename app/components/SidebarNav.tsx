@@ -14,6 +14,7 @@ export default function SidebarNav() {
     { href: '/classes', label: 'Classes Management' },
     { href: '/students', label: 'All Students' },
     { href: '/tracking', label: 'Class-wise Tracking' },
+    { href: '/generate', label: 'Generate Vouchers' },
     { href: '/expenses', label: 'Expense Manager' },
     { href: '/reports', label: 'Financial Reports' },
   ];

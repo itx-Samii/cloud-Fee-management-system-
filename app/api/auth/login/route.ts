@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server';
-import { readConfig } from '@/lib/fileHandler';
+import { readConfig, verifyPassword } from '@/lib/fileHandler';
 import { cookies } from 'next/headers';
 
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
     const trimmedPassword = password?.trim();
+
+    if (!trimmedPassword) {
+      return NextResponse.json({ error: 'Password is required' }, { status: 400 });
+    }
+
     const config = await readConfig();
 
-    if (trimmedPassword === config.adminPassword) {
+    if (verifyPassword(trimmedPassword, config.adminPassword)) {
       // Set a session cookie
       const cookieStore = await cookies();
       cookieStore.set('school-session', 'authenticated', {

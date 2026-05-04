@@ -4,6 +4,7 @@ import './globals.css';
 import ThemeSwitcher from './components/ThemeSwitcher';
 import SidebarNav from './components/SidebarNav';
 import AuthGuard from './components/AuthGuard';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const themeScript = `(function(){try{var saved=localStorage.getItem('school-theme')||'light';document.documentElement.setAttribute('data-theme',saved);}catch(e){}})();`;
 
@@ -33,7 +34,9 @@ export default function RootLayout({
           <ThemeSwitcher />
         </aside>
         <main className="main-content" style={{marginLeft: '260px', width: 'calc(100% - 260px)'}}>
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </body>
     </html>

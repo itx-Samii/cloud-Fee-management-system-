@@ -16,7 +16,7 @@ export default function ClassDetails() {
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState({ name: '', fatherName: '', monthlyFee: '', discount: '', annualCharges: '0' });
+  const [formData, setFormData] = useState({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
 
   const fetchClassDetails = async () => {
     try {
@@ -59,6 +59,7 @@ export default function ClassDetails() {
     const payload = {
       name: formData.name,
       fatherName: formData.fatherName,
+      admissionNumber: formData.admissionNumber || undefined,
       classId: classId,
       monthlyFee: parseFloat(formData.monthlyFee || '0'),
       discount: parseFloat(formData.discount || '0'),
@@ -77,7 +78,7 @@ export default function ClassDetails() {
     if (res.ok) {
       setShowModal(false);
       setEditingId(null);
-      setFormData({ name: '', fatherName: '', monthlyFee: '', discount: '', annualCharges: '0' });
+      setFormData({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
       fetchStudents();
     } else {
       alert("Failed to save.");
@@ -89,6 +90,7 @@ export default function ClassDetails() {
     setFormData({
       name: student.name || '',
       fatherName: student.fatherName || '',
+      admissionNumber: student.admissionNumber || '',
       monthlyFee: (student.monthlyFee || 0).toString(),
       discount: (student.discount || 0).toString(),
       annualCharges: (student.annualCharges || 0).toString()
@@ -113,7 +115,7 @@ export default function ClassDetails() {
           <h1>{classInfo ? `${classInfo.name} ${classInfo.section ? ` - ${classInfo.section}` : ''}` : 'Loading...'}</h1>
           <p>Manage {students.length} students assigned to this class.</p>
         </div>
-        <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', monthlyFee: '', discount: '', annualCharges: '0' }); setShowModal(true); }} className="btn btn-primary">+ Register Student</button>
+        <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' }); setShowModal(true); }} className="btn btn-primary">+ Register Student</button>
       </div>
 
       <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
@@ -131,6 +133,7 @@ export default function ClassDetails() {
           <thead>
             <tr>
               <th style={{width: '80px'}}>Sr No</th>
+              <th>Adm No</th>
               <th>Student & Father Name</th>
               <th>Base Fee</th>
               <th>Discount Applied</th>
@@ -140,13 +143,14 @@ export default function ClassDetails() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center' }}>Loading data...</td></tr>
+              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center' }}>Loading data...</td></tr>
             ) : students.length === 0 ? (
-              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center' }}>No students found in this class.</td></tr>
+              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center' }}>No students found in this class.</td></tr>
             ) : (
               students.map((s, idx) => (
                 <tr key={s.id}>
                   <td style={{ color: 'var(--text-muted)' }}>#{(page - 1) * 20 + idx + 1}</td>
+                  <td style={{ fontWeight: 700 }}>{s.admissionNumber || 'N/A'}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{s.name}</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>S/O: {s.fatherName || 'N/A'}</div>
@@ -187,6 +191,10 @@ export default function ClassDetails() {
               <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                 <label className="form-label">Father's Name</label>
                 <input required className="form-input" value={formData.fatherName} onChange={e => setFormData({ ...formData, fatherName: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Admission Number</label>
+                <input className="form-input" placeholder="e.g. ADM-001" value={formData.admissionNumber} onChange={e => setFormData({ ...formData, admissionNumber: e.target.value })} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div className="form-group">

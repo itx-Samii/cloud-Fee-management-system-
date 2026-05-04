@@ -13,7 +13,7 @@ export default function StudentsDirectory() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [classes, setClasses] = useState<any[]>([]);
-  const [formData, setFormData] = useState({ name: '', fatherName: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' });
+  const [formData, setFormData] = useState({ name: '', fatherName: '', admissionNumber: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' });
 
   const fetchClasses = async () => {
     try {
@@ -56,6 +56,7 @@ export default function StudentsDirectory() {
     const payload = {
       name: formData.name,
       fatherName: formData.fatherName,
+      admissionNumber: formData.admissionNumber,
       classId: formData.classId,
       monthlyFee: parseFloat(formData.monthlyFee || '0'),
       discount: parseFloat(formData.discount || '0'),
@@ -74,7 +75,7 @@ export default function StudentsDirectory() {
     if (res.ok) {
       setShowModal(false);
       setEditingId(null);
-      setFormData({ name: '', fatherName: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' });
+      setFormData({ name: '', fatherName: '', admissionNumber: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' });
       fetchStudents();
     } else {
       alert("Failed to save.");
@@ -86,6 +87,7 @@ export default function StudentsDirectory() {
     setFormData({
       name: student.name || '',
       fatherName: student.fatherName || '',
+      admissionNumber: student.admissionNumber || '',
       classId: student.classId || '',
       monthlyFee: (student.monthlyFee || 0).toString(),
       discount: (student.discount || 0).toString(),
@@ -114,6 +116,7 @@ export default function StudentsDirectory() {
             className="btn btn-secondary" 
             onClick={() => exportToCSV(students, 'All_Students', {
               id: 'ID',
+              admissionNumber: 'Admission No',
               name: 'Name',
               rollNumber: 'Roll No',
               classId: 'Class ID',
@@ -126,7 +129,7 @@ export default function StudentsDirectory() {
           >
             Export to Excel
           </button>
-          <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' }); setShowModal(true); }} className="btn btn-primary">+ Add Student Globally</button>
+          <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', admissionNumber: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' }); setShowModal(true); }} className="btn btn-primary">+ Add Student Globally</button>
         </div>
       </div>
 
@@ -145,6 +148,7 @@ export default function StudentsDirectory() {
           <thead>
             <tr>
               <th style={{width: '80px'}}>Sr No</th>
+              <th>Adm No</th>
               <th>Student & Father Name</th>
               <th>Class</th>
               <th>Base Fee</th>
@@ -162,6 +166,7 @@ export default function StudentsDirectory() {
               students.map((s, idx) => (
                 <tr key={s.id}>
                   <td style={{color: 'var(--text-muted)'}}>#{(page - 1) * 20 + idx + 1}</td>
+                  <td style={{fontWeight: 700}}>{s.admissionNumber || 'N/A'}</td>
                   <td>
                     <div style={{fontWeight: 600}}>{s.name}</div>
                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>S/O: {s.fatherName || 'N/A'}</div>
@@ -196,9 +201,15 @@ export default function StudentsDirectory() {
           <div className="glass-panel" style={{width: '100%', maxWidth: '500px', padding: '2rem'}}>
             <h2 style={{marginBottom: '1.5rem'}}>{editingId ? 'Modify Student Record' : 'Register Student'}</h2>
             <form onSubmit={handleSaveStudent}>
-              <div className="form-group">
-                <label className="form-label">Full Name</label>
-                <input required className="form-input" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem'}}>
+                <div className="form-group">
+                  <label className="form-label">Admission Number</label>
+                  <input className="form-input" placeholder="e.g. 2024-001" value={formData.admissionNumber} onChange={e => setFormData({...formData, admissionNumber: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Full Name</label>
+                  <input required className="form-input" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                </div>
               </div>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem'}}>
                 <div>

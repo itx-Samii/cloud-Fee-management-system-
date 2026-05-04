@@ -4,5 +4,23 @@
     "name": "Class One",
     "section": "Blue",
     "createdAt": "2026-04-25T03:51:11.294Z"
+  },
+  {
+    "id": 2,
+    "name": "Class 1",
+    "section": "blue",
+    "createdAt": "2026-05-04T18:32:30.365Z"
+  },
+  {
+    "id": 3,
+    "name": "Class 2",
+    "section": "green",
+    "createdAt": "2026-05-04T18:32:41.588Z"
+  },
+  {
+    "id": 4,
+    "name": "Class 3",
+    "section": "Yellow",
+    "createdAt": "2026-05-04T18:32:54.877Z"
   }
 ]
