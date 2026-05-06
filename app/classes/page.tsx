@@ -5,6 +5,7 @@ import Link from 'next/link';
 export default function ClassesHub() {
   const [classes, setClasses] = useState<any[]>([]);
   const [showClassModal, setShowClassModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [classForm, setClassForm] = useState({ name: '', section: '' });
 
   const fetchClasses = async () => {
@@ -21,6 +22,12 @@ export default function ClassesHub() {
     fetchClasses();
   }, []);
 
+  const handleEditClick = (c: any) => {
+    setEditingId(c.id);
+    setClassForm({ name: c.name, section: c.section || '' });
+    setShowClassModal(true);
+  };
+
   const handleDeleteClass = async (id: number) => {
     if (!confirm("Are you sure you want to delete this class? All references will fallback to raw IDs.")) return;
     const res = await fetch(`/api/classes?id=${id}`, { method: 'DELETE' });
@@ -34,7 +41,7 @@ export default function ClassesHub() {
           <h1>Classes Management</h1>
           <p>Organize students into classes and sections.</p>
         </div>
-        <button onClick={() => setShowClassModal(true)} className="btn btn-primary">+ Create New Class</button>
+        <button onClick={() => { setEditingId(null); setClassForm({name:'', section:''}); setShowClassModal(true); }} className="btn btn-primary">+ Create New Class</button>
       </div>
 
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem'}}>
@@ -45,9 +52,12 @@ export default function ClassesHub() {
         ) : (
           classes.map(c => (
             <div key={c.id} className="glass-panel" style={{padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem'}}>
-              <div>
-                <h2 style={{margin: 0, fontSize: '1.4rem'}}>{c.name}</h2>
-                {c.section && <span className="badge badge-success" style={{marginTop: '0.5rem', display: 'inline-block'}}>{c.section}</span>}
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                <div>
+                  <h2 style={{margin: 0, fontSize: '1.4rem'}}>{c.name}</h2>
+                  {c.section && <span className="badge badge-success" style={{marginTop: '0.5rem', display: 'inline-block'}}>{c.section}</span>}
+                </div>
+                <button className="btn btn-secondary" style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem'}} onClick={() => handleEditClick(c)}>Edit</button>
               </div>
               <div style={{color: 'var(--text-muted)', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem'}}>
                 <span>Created: {new Date(c.createdAt).toLocaleDateString()}</span>
@@ -65,16 +75,17 @@ export default function ClassesHub() {
       {showClassModal && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '500px', padding: '2rem'}}>
-            <h2 style={{marginBottom: '1.5rem'}}>Create New Class</h2>
+            <h2 style={{marginBottom: '1.5rem'}}>{editingId ? 'Edit Class' : 'Create New Class'}</h2>
             <form onSubmit={async (e) => {
               e.preventDefault();
               const res = await fetch('/api/classes', {
-                method: "POST",
+                method: editingId ? "PUT" : "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(classForm)
+                body: JSON.stringify(editingId ? { ...classForm, id: editingId } : classForm)
               });
               if(res.ok) {
                 setShowClassModal(false);
+                setEditingId(null);
                 setClassForm({name:'', section:''});
                 fetchClasses();
               } else {
@@ -91,8 +102,8 @@ export default function ClassesHub() {
               </div>
               
               <div style={{display: 'flex', gap: '1rem', marginTop: '2rem'}}>
-                <button type="button" className="btn btn-secondary" style={{flex: 1}} onClick={() => setShowClassModal(false)}>Close</button>
-                <button type="submit" className="btn btn-primary" style={{flex: 1}}>Save</button>
+                <button type="button" className="btn btn-secondary" style={{flex: 1}} onClick={() => { setShowClassModal(false); setEditingId(null); }}>Close</button>
+                <button type="submit" className="btn btn-primary" style={{flex: 1}}>{editingId ? 'Update' : 'Save'}</button>
               </div>
             </form>
           </div>

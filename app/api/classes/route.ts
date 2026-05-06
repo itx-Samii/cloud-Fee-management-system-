@@ -69,3 +69,43 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Failed to delete class' }, { status: 500 });
   }
 }
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, name, section } = body;
+    
+    if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+    if (!name) return NextResponse.json({ error: 'Class name is required' }, { status: 400 });
+
+    const classes = await readData<any>(FILE_NAME);
+    const index = classes.findIndex((c: any) => c.id.toString() === id.toString());
+    
+    if (index === -1) {
+      return NextResponse.json({ error: 'Class not found' }, { status: 404 });
+    }
+
+    // Check if another class with same name and section exists
+    const exists = classes.find((c: any) => 
+      c.id.toString() !== id.toString() && 
+      c.name.toLowerCase() === name.toLowerCase() && 
+      (c.section || '').toLowerCase() === (section || '').toLowerCase()
+    );
+    
+    if (exists) {
+      return NextResponse.json({ error: 'Another class with this Name and Section already exists' }, { status: 400 });
+    }
+
+    classes[index] = { 
+      ...classes[index], 
+      name, 
+      section: section || '',
+      updatedAt: new Date().toISOString() 
+    };
+    
+    await writeData(FILE_NAME, classes);
+    return NextResponse.json(classes[index]);
+  } catch (err) {
+    return NextResponse.json({ error: 'Failed to update class' }, { status: 500 });
+  }
+}

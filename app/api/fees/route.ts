@@ -10,7 +10,8 @@ interface FeeRecord {
   baseAmount: number;
   discount: number;
   amount: number;
-  status: 'Paid' | 'Unpaid';
+  status: 'Paid' | 'Unpaid' | 'Partially Paid';
+  previousArrears?: number;
   issueDate: string;
   paymentDate: string | null;
   paidTuition?: number;
@@ -61,8 +62,26 @@ export async function GET(request: Request) {
       const student = students.find((s) => s.id === f.studentId);
       const studentClass = student?.classId ? classes.find((c) => c.id.toString() === student.classId.toString()) : null;
       const classDisplay = studentClass ? `${studentClass.name}${studentClass.section ? ` - ${studentClass.section}` : ''}` : student?.classId || 'N/A';
+      
+      // Dynamic Arrears Calculation:
+      // Only recalculate if the current voucher is not fully paid.
+      // Sum up all OTHER unpaid/partial vouchers for this student that are NOT this one.
+      // Calculate Dynamic Arrears (Live balance from other unpaid vouchers)
+      const dynamicArrears = fees
+        .filter(prev => 
+          prev.studentId === f.studentId && 
+          prev.id !== f.id && 
+          prev.status !== 'Paid' && 
+          prev.month !== 'Annual Charges'
+        )
+        .reduce((sum, prev) => {
+          const due = (prev.amount || 0) - (prev.paidTuition || 0);
+          return sum + (due > 0 ? due : 0);
+        }, 0);
+
       return {
         ...f,
+        previousArrears: dynamicArrears,
         studentName: student?.name || 'Unknown',
         fatherName: student?.fatherName || 'N/A',
         admissionNumber: student?.admissionNumber || 'N/A',
@@ -152,6 +171,15 @@ export async function POST(request: Request) {
       // Check if fee already exists
       const exists = allFees.find((f) => f.studentId === student.id && f.month === month && f.year === year);
       if (!exists) {
+        // Calculate Previous Arrears
+        // Arrears = Sum of (amount - totalReceived) for all Unpaid/Partially Paid records
+        const arrears = allFees
+          .filter(f => f.studentId === student.id && f.status !== 'Paid' && f.month !== 'Annual Charges')
+          .reduce((sum, f) => {
+            const due = (f.amount || 0) - (f.paidTuition || 0);
+            return sum + (due > 0 ? due : 0);
+          }, 0);
+
         const netAmount = (student.monthlyFee || 0) - (student.discount || 0);
 
         allFees.push({
@@ -162,6 +190,7 @@ export async function POST(request: Request) {
           baseAmount: student.monthlyFee || 0,
           discount: student.discount || 0,
           amount: netAmount > 0 ? netAmount : 0,
+          previousArrears: arrears,
           status: 'Unpaid',
           issueDate: new Date().toISOString(),
           paymentDate: null
@@ -185,41 +214,72 @@ export async function PUT(request: Request) {
     const { id, paidTuition, paidAC } = await request.json();
     if (!id) return NextResponse.json({ error: 'Voucher ID missing' }, { status: 400 });
 
-    // Validate payment amounts
-    if (paidTuition !== undefined && (isNaN(Number(paidTuition)) || Number(paidTuition) < 0)) {
-      return NextResponse.json({ error: 'Tuition amount must be a non-negative number' }, { status: 400 });
-    }
-    if (paidAC !== undefined && (isNaN(Number(paidAC)) || Number(paidAC) < 0)) {
-      return NextResponse.json({ error: 'AC amount must be a non-negative number' }, { status: 400 });
-    }
-
     const allFees = await readData<FeeRecord>(FILE_NAME);
     const feeIndex = allFees.findIndex((f) => f.id === id);
-    
-    if (feeIndex === -1) {
-      return NextResponse.json({ error: 'Voucher not found' }, { status: 404 });
-    }
+    if (feeIndex === -1) return NextResponse.json({ error: 'Voucher not found' }, { status: 404 });
 
     const feeRecord = allFees[feeIndex];
+    const studentId = feeRecord.studentId;
+    const paymentDate = new Date().toISOString();
 
-    // Update Student AC Balance
-    const students = await readData<Student>(STUDENTS_FILE);
-    const studentIndex = students.findIndex((s) => s.id === feeRecord.studentId);
-    
-    if (studentIndex !== -1) {
-      const acAmount = parseFloat(paidAC || '0');
-      students[studentIndex].paidAnnualCharges = (students[studentIndex].paidAnnualCharges || 0) + acAmount;
-      await writeData(STUDENTS_FILE, students);
+    // 1. Handle AC Payment (Directly to student record)
+    const newPaidAC = parseFloat(paidAC || '0');
+    if (newPaidAC > 0) {
+      const students = await readData<Student>(STUDENTS_FILE);
+      const studentIndex = students.findIndex((s) => s.id === studentId);
+      if (studentIndex !== -1) {
+        students[studentIndex].paidAnnualCharges = (students[studentIndex].paidAnnualCharges || 0) + newPaidAC;
+        await writeData(STUDENTS_FILE, students);
+      }
+      allFees[feeIndex].paidAC = (allFees[feeIndex].paidAC || 0) + newPaidAC;
+      allFees[feeIndex].totalReceived = (allFees[feeIndex].totalReceived || 0) + newPaidAC;
     }
 
-    allFees[feeIndex].status = 'Paid';
-    allFees[feeIndex].paymentDate = new Date().toISOString();
-    allFees[feeIndex].paidTuition = parseFloat(paidTuition || feeRecord.amount as any);
-    allFees[feeIndex].paidAC = parseFloat(paidAC || '0');
-    allFees[feeIndex].totalReceived = (allFees[feeIndex].paidTuition || 0) + (allFees[feeIndex].paidAC || 0);
+    // 2. Handle Tuition Payment (Propagation Logic)
+    let remainingPayment = parseFloat(paidTuition || '0');
+    
+    if (remainingPayment > 0) {
+      // Find all unpaid/partial vouchers for this student (excluding Annual Charges records)
+      // Sort by issueDate or ID to pay oldest first
+      const studentVouchers = allFees
+        .filter(f => f.studentId === studentId && f.month !== 'Annual Charges' && f.status !== 'Paid')
+        .sort((a, b) => new Date(a.issueDate).getTime() - new Date(b.issueDate).getTime());
+
+      for (const v of studentVouchers) {
+        if (remainingPayment <= 0) break;
+
+        const voucherBalance = (v.amount || 0) - (v.paidTuition || 0);
+        if (voucherBalance <= 0) continue;
+
+        const amountToApply = Math.min(remainingPayment, voucherBalance);
+        
+        // Find actual record in allFees to update
+        const idx = allFees.findIndex(f => f.id === v.id);
+        if (idx !== -1) {
+          allFees[idx].paidTuition = (allFees[idx].paidTuition || 0) + amountToApply;
+          allFees[idx].totalReceived = (allFees[idx].totalReceived || 0) + amountToApply;
+          allFees[idx].paymentDate = paymentDate;
+          
+          // Update Status
+          if (allFees[idx].paidTuition >= (allFees[idx].amount || 0)) {
+            allFees[idx].status = 'Paid';
+          } else {
+            allFees[idx].status = 'Partially Paid';
+          }
+          
+          remainingPayment -= amountToApply;
+        }
+      }
+
+      // If there's still money left (Overpayment), put it on the current voucher
+      if (remainingPayment > 0) {
+        allFees[feeIndex].paidTuition = (allFees[feeIndex].paidTuition || 0) + remainingPayment;
+        allFees[feeIndex].totalReceived = (allFees[feeIndex].totalReceived || 0) + remainingPayment;
+        allFees[feeIndex].status = 'Paid'; // Overpaid is still Paid
+      }
+    }
 
     await writeData(FILE_NAME, allFees);
-    
     return NextResponse.json(allFees[feeIndex]);
   } catch (err) {
     return NextResponse.json({ error: 'System Error processing payment' }, { status: 500 });

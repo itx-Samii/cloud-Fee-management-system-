@@ -1,0 +1,110 @@
+/* Bulk Challan Generation specific styles */
+
+@media print {
+  @page {
+    size: A4 landscape !important;
+    margin: 5mm !important;
+  }
+
+  .voucher-card {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    width: 100% !important;
+    height: 195mm !important;
+    display: flex !important;
+    flex-direction: row !important;
+    overflow: hidden !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+    box-sizing: border-box !important;
+  }
+
+  .voucher-copy {
+    flex: 1 1 0% !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 4mm 5mm !important;
+  }
+
+  /* Ensure main text is black, but allow overrides (like the white Total text) */
+  .voucher-copy {
+    color: #000 !important;
+    position: relative !important;
+  }
+
+  /* Watermark */
+  .logo-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 250px;
+    height: 250px;
+    object-fit: contain;
+    opacity: 0.08 !important;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .voucher-content {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  /* Professional Table Borders */
+  .challan-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2mm 0;
+  }
+  .challan-table th, .challan-table td {
+    border: 0.5pt solid #000;
+    padding: 1mm 2mm;
+    font-size: 8pt;
+  }
+  .challan-table th {
+    background: #f1f5f9 !important;
+    text-align: center;
+    font-weight: 800;
+  }
+
+  .copy-header {
+    background: #000 !important;
+    color: #fff !important;
+    text-align: center;
+    padding: 1mm;
+    font-weight: 900;
+    font-size: 10pt;
+    text-transform: uppercase;
+    margin-bottom: 2mm;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1mm 4mm;
+    font-size: 8pt;
+    margin: 2mm 0;
+  }
+
+  .info-item {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 0.2pt solid #eee;
+    padding-bottom: 0.5mm;
+  }
+}
+

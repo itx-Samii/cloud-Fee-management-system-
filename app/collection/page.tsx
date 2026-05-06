@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
+import './collection.css';
 
 export default function FeeCollection() {
   const [search, setSearch] = useState('');
@@ -125,9 +126,12 @@ export default function FeeCollection() {
         setFeeData({ 
           ...feeData, 
           ...updated,
-          // Manually update AC balance for instant UI feedback
           remainingAnnualCharges: (feeData.remainingAnnualCharges || 0) - parseFloat(paidAC)
         });
+        
+        // Update the global list so search results show the new status
+        setAllFees(prev => prev.map(f => f.id === updated.id ? { ...f, ...updated } : f));
+
         // trigger print wrapper
         setTimeout(() => window.print(), 300);
       } else {
@@ -202,118 +206,164 @@ export default function FeeCollection() {
       )}
 
       {feeData && (
-        <div className="glass-panel receipt-container" style={{padding: '2rem', maxWidth: '600px', margin: '0 auto', background: 'white'}}>
-          
-          <div className="print-only-header" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '2rem', borderBottom: '2px solid black', paddingBottom: '1rem'}}>
-            {logo && <img src={logo} alt="Logo" style={{width: '90px', height: '90px', objectFit: 'contain', marginRight: '15px'}} />}
-            <div style={{textAlign: 'center'}}>
-              <h2 contentEditable suppressContentEditableWarning onBlur={handleSaveName} style={{fontWeight: 800, margin: 0, outline: 'none', color: '#000'}}>
-                {mounted ? schoolName : 'TRUST SCHOOL SYSTEM'}
-              </h2>
-              <p contentEditable suppressContentEditableWarning onBlur={handleSaveAddress} style={{fontSize: '0.9rem', outline: 'none', color: '#333'}}>
-                {mounted ? schoolAddress : 'Campus Address / Contact No'}
-              </p>
-              <h3 style={{marginTop: '1rem', background: '#000', color: '#fff', display: 'inline-block', padding: '0.2rem 1rem', borderRadius: '4px'}}>OFFICIAL RECEIPT</h3>
+        <div className="receipt-container" style={{maxWidth: '800px', margin: '0 auto'}}>
+          <div className="physical-receipt">
+            {logo && <img src={logo} alt="Watermark" style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '70%',
+                opacity: 0.08,
+                zIndex: 0,
+                pointerEvents: 'none'
+            }} />}
+            {/* Header Section */}
+            <div className="receipt-header-main" contentEditable suppressContentEditableWarning onBlur={handleSaveName}>
+              {mounted ? (schoolName === 'TRUST SCHOOL SYSTEM' ? "THE BROOK FIELD SCHOOL'S SYSTEM" : schoolName) : "THE BROOK FIELD SCHOOL'S SYSTEM"}
             </div>
-          </div>
 
-          <div className="no-print" style={{textAlign: 'center', marginBottom: '1.5rem'}}>
-            <h2 style={{color: '#000'}}>FEE VOUCHER #{feeData.id}</h2>
-            <p style={{color: '#444'}}>Billing Cycle: {feeData.month} {feeData.year}</p>
-          </div>
-
-          <div style={{border: '1px solid #ccc', padding: '1.5rem', borderRadius: '12px', marginBottom: '2rem', color: '#000'}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-              <span style={{color: '#555', fontWeight: 600}}>Receipt No:</span>
-              <span style={{fontWeight: 600, color: '#000'}}>#{feeData.id}</span>
-            </div>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-              <span style={{color: '#555', fontWeight: 600}}>Date:</span>
-              <span style={{fontWeight: 600, color: '#000'}}>{new Date().toLocaleDateString()}</span>
-            </div>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-              <span style={{color: '#555', fontWeight: 600}}>Student Name:</span>
-              <span style={{fontWeight: 800, fontSize: '1.2rem', color: '#000'}}>{feeData.studentName} S/O {feeData.fatherName}</span>
-            </div>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-              <span style={{color: '#555', fontWeight: 600}}>Class:</span>
-              <span style={{color: '#000', fontWeight: 700}}>{feeData.className}</span>
-            </div>
-            <div className="no-print" style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-              <span style={{color: '#555'}}>Current Status:</span>
-              <span className={`badge ${feeData.status === 'Paid' ? 'badge-success' : 'badge-warning'}`}>
-                {feeData.status}
-              </span>
-            </div>
-            {feeData.totalAnnualCharges > 0 && (
-              <div style={{display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #eee'}}>
-                <span style={{color: '#666', fontSize: '0.85rem'}}>Session AC Balance:</span>
-                <span style={{fontWeight: 700, color: 'var(--danger)', fontSize: '0.9rem'}}>Rs. {feeData.remainingAnnualCharges}</span>
+            <div className="campus-grid">
+              <div className="campus-item" contentEditable suppressContentEditableWarning>
+                BOYS CAMPUS<br/>Allama Iqbal Colony
               </div>
-            )}
-          </div>
-
-          <div style={{borderTop: '2px dashed #ccc', paddingTop: '1.5rem', marginBottom: '2rem', color: '#000'}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: '#555'}}>
-              <span>Base Tuition Fee</span>
-              <span style={{color: '#000'}}>Rs. {feeData.baseAmount || feeData.amount}</span>
-            </div>
-            {feeData.discount > 0 && (
-              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', color: '#059669'}}>
-                <span>Scholarship/Discount</span>
-                <span>- Rs. {feeData.discount}</span>
+              <div className="campus-item" contentEditable suppressContentEditableWarning>
+                BENCHMARK CAMPUS<br/>DHOKE MANGTAL
               </div>
-            )}
-            
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', color: '#555'}}>
-              <span>Monthly Portion</span>
-              <span style={{color: '#000'}}>Rs. {feeData.status === 'Paid' ? (feeData.paidTuition || feeData.amount) : paidTuition}</span>
             </div>
 
-            {( (feeData.status === 'Paid' && feeData.paidAC > 0) || (feeData.status === 'Unpaid' && parseFloat(paidAC) > 0) ) && (
-              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', color: 'var(--primary)'}}>
-                <span>Annual Charges (AC)</span>
-                <span style={{fontWeight: 600}}>+ Rs. {feeData.status === 'Paid' ? feeData.paidAC : paidAC}</span>
+            <div className="contact-header-bar" contentEditable suppressContentEditableWarning onBlur={handleSaveAddress}>
+              {mounted ? (schoolAddress === 'Campus Address / Contact No' ? "Dhoke Hassu, Rawalpindi. Mob: 0333-5435678, 0345-5904708" : schoolAddress) : "Dhoke Hassu, Rawalpindi. Mob: 0333-5435678, 0345-5904708"}
+            </div>
+
+            {/* Sub Header (Official Receipt + ID) */}
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
+               <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+                  <span style={{fontWeight: 800}}>Dated:</span>
+                  <span style={{borderBottom: '1px solid #1e3a8a', minWidth: '150px', fontWeight: 600}} contentEditable suppressContentEditableWarning>{new Date().toLocaleDateString()}</span>
+               </div>
+               <div style={{textAlign: 'center'}}>
+                  <span style={{background: '#3730a3', color: 'white', padding: '2px 15px', borderRadius: '4px', fontWeight: 900, fontSize: '0.8rem'}}>OFFICIAL RECEIPT</span>
+               </div>
+               <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+                  <span style={{fontWeight: 800}}>No.</span>
+                  <span style={{fontSize: '1.5rem', fontWeight: 900, letterSpacing: '2px'}} contentEditable suppressContentEditableWarning>{feeData.id}</span>
+               </div>
+            </div>
+
+            {/* Student Info Lines */}
+            <div className="info-row">
+              <span className="info-label">Name</span>
+              <span className="info-value" contentEditable suppressContentEditableWarning>{feeData.studentName}</span>
+            </div>
+            <div style={{display: 'flex', gap: '20px'}}>
+              <div className="info-row" style={{flex: 2}}>
+                <span className="info-label">S/O</span>
+                <span className="info-value" contentEditable suppressContentEditableWarning>{feeData.fatherName}</span>
               </div>
-            )}
-            
-            <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '1.5rem', fontWeight: 800, borderTop: '1px solid #ccc', paddingTop: '1rem', color: '#000'}}>
-              <span>TOTAL RECEIVED</span>
-              <span>Rs. {feeData.status === 'Paid' ? (feeData.totalReceived || feeData.amount) : (parseFloat(paidTuition || '0') + parseFloat(paidAC || '0'))}</span>
+              <div className="info-row" style={{flex: 1}}>
+                <span className="info-label">Class</span>
+                <span className="info-value" contentEditable suppressContentEditableWarning>{feeData.className}</span>
+              </div>
             </div>
-          </div>
-          
-          <div className="print-only-footer" style={{marginTop: '4rem', display: 'flex', justifyContent: 'space-between', color: '#000'}}>
-            <div style={{borderTop: '1px solid black', width: '40%', textAlign: 'center', paddingTop: '0.5rem'}}>Accountant Signature</div>
-            <div style={{borderTop: '1px solid black', width: '40%', textAlign: 'center', paddingTop: '0.5rem'}}>Depositor Signature</div>
-          </div>
 
-          <div className="no-print" style={{marginTop: '2rem'}}>
-            {feeData.status === 'Unpaid' ? (
-              <>
-                <div className="glass-panel no-print" style={{padding: '1.25rem', background: '#f8fafc', marginBottom: '1.5rem', border: '1px solid #cbd5e1'}}>
-                  <h4 style={{marginBottom: '1rem', color: 'var(--text-main)', fontSize: '1rem'}}>Payment Breakdown</h4>
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem'}}>
-                    <div>
-                      <label className="form-label" style={{fontSize: '0.8rem'}}>RECEIVE FEE (RS.)</label>
-                      <input type="number" className="form-input" value={paidTuition} onChange={e => setPaidTuition(e.target.value)} />
-                    </div>
-                    <div>
-                      <label className="form-label" style={{fontSize: '0.8rem'}}>RECEIVE AC (RS.)</label>
-                      <input type="number" className="form-input" value={paidAC} onChange={e => setPaidAC(e.target.value)} />
-                    </div>
+            {/* Particulars Table */}
+            <table className="particulars-table">
+              <thead>
+                <tr>
+                  <th style={{width: '70%'}}>PARTICULAR</th>
+                  <th>AMOUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>1. Admission Fee / Security</td>
+                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
+                </tr>
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>2. Tuition Fee (Month: {feeData.month})</td>
+                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>{feeData.baseAmount || feeData.amount}</td>
+                </tr>
+                {feeData.discount > 0 && (
+                  <tr>
+                    <td style={{color: 'var(--success)', fontWeight: 'bold'}} contentEditable suppressContentEditableWarning>3. Scholarship / Discount</td>
+                    <td style={{textAlign: 'right', color: 'var(--success)', fontWeight: 'bold'}} contentEditable suppressContentEditableWarning>- {feeData.discount}</td>
+                  </tr>
+                )}
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>4. Examination Fee</td>
+                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
+                </tr>
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>5. Previous Balance / Arrears</td>
+                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>{feeData.previousArrears || 0}</td>
+                </tr>
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>6. Annual Charges (AC) Pending</td>
+                  <td style={{textAlign: 'right', color: feeData.remainingAnnualCharges > 0 ? 'var(--danger)' : 'inherit'}} contentEditable suppressContentEditableWarning>{feeData.remainingAnnualCharges || 0}</td>
+                </tr>
+
+                <tr>
+                  <td contentEditable suppressContentEditableWarning>7. Fine / Other Charges</td>
+                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
+                </tr>
+              </tbody>
+            </table>
+
+
+
+            {/* Calculation & Signatures */}
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+              <div style={{flex: 1}}>
+                 <div className="signature-section" style={{marginTop: '20px'}}>
+                    <div className="sig-item" contentEditable suppressContentEditableWarning>Accountant</div>
+                    <div className="sig-item" contentEditable suppressContentEditableWarning>Sig./Stamp</div>
+                 </div>
+                 <div className="no-print" style={{marginTop: '30px', textAlign: 'center'}}>
+                    {feeData.status === 'Paid' || feeData.status === 'Partially Paid' ? (
+                       <p style={{color: 'var(--success)', fontWeight: 'bold'}}>✓ Payment recorded on {new Date(feeData.paymentDate).toLocaleDateString()}</p>
+                    ) : null}
+                    <button className="btn btn-secondary" onClick={() => window.print()} style={{marginTop: '10px'}}>Print Receipt</button>
+                 </div>
+              </div>
+
+              <div className="calculation-box">
+                <div className="calc-row">
+                  <div className="calc-label">Total Payable</div>
+                  <div className="calc-value">{(feeData.baseAmount || feeData.amount) - (feeData.discount || 0) + (feeData.previousArrears || 0) + (feeData.remainingAnnualCharges || 0)}</div>
+                </div>
+                <div className="calc-row">
+                  <div className="calc-label">Total Received</div>
+                  <div className="calc-value">{feeData.totalReceived || 0}</div>
+                </div>
+                <div className="calc-row balance-row">
+                  <div className="calc-label">Pending / Bal.</div>
+                  <div className="calc-value">
+                    {Math.max(0, ((feeData.baseAmount || feeData.amount) - (feeData.discount || 0) + (feeData.previousArrears || 0) + (feeData.remainingAnnualCharges || 0)) - (feeData.totalReceived || 0))}
                   </div>
                 </div>
-                <button className="btn btn-primary no-print" onClick={handlePay} disabled={processing} style={{width: '100%', padding: '1.25rem', fontSize: '1.1rem'}}>
-                  {processing ? 'Processing...' : `Confirm Receipt (Rs. ${parseFloat(paidTuition || '0') + parseFloat(paidAC || '0')})`}
-                </button>
-              </>
-            ) : (
-               <div style={{textAlign: 'center'}}>
-                 <p style={{color: 'var(--success)', fontWeight: 'bold', marginBottom: '1rem'}}>
-                   ✓ Payment received on {new Date(feeData.paymentDate).toLocaleDateString()}
-                 </p>
-                 <button className="btn btn-secondary no-print" onClick={() => window.print()}>Print Duplicate Receipt</button>
+              </div>
+
+
+
+            </div>
+
+            {/* Payment Controls (No Print) */}
+            {feeData.status !== 'Paid' && (
+               <div className="no-print" style={{marginTop: '2rem', borderTop: '1px solid #ccc', paddingTop: '1rem'}}>
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem'}}>
+                     <div>
+                        <label className="form-label">Receive Tuition</label>
+                        <input type="number" className="form-input" value={paidTuition} onChange={e => setPaidTuition(e.target.value)} />
+                     </div>
+                     <div>
+                        <label className="form-label">Receive AC/Misc</label>
+                        <input type="number" className="form-input" value={paidAC} onChange={e => setPaidAC(e.target.value)} />
+                     </div>
+                  </div>
+                  <button className="btn btn-primary" onClick={handlePay} disabled={processing} style={{width: '100%'}}>
+                    {processing ? 'Processing...' : 'Confirm & Save Payment'}
+                  </button>
                </div>
             )}
           </div>

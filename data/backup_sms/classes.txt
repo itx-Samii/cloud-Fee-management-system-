@@ -1,7 +1,0 @@
-[
-  {
-    "id": 1,
-    "name": "10th",
-    "description": "Class 10th"
-  }
-]

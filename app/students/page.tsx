@@ -12,6 +12,7 @@ export default function StudentsDirectory() {
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState('all');
   const [classes, setClasses] = useState<any[]>([]);
   const [formData, setFormData] = useState({ name: '', fatherName: '', admissionNumber: '', classId: '', monthlyFee: '', discount: '', annualCharges: '0' });
 
@@ -32,7 +33,8 @@ export default function StudentsDirectory() {
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/students?page=${page}&limit=20&search=${search}`, { cache: 'no-store' });
+      const classQuery = selectedClassId !== 'all' ? `&classId=${selectedClassId}` : '';
+      const res = await fetch(`/api/students?page=${page}&limit=20&search=${search}${classQuery}`, { cache: 'no-store' });
       const data = await res.json();
       setStudents(data.data || []);
       setTotalPages(data.totalPages || 1);
@@ -49,7 +51,7 @@ export default function StudentsDirectory() {
       fetchStudents();
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [search, page]);
+  }, [search, page, selectedClassId]);
 
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,14 +135,26 @@ export default function StudentsDirectory() {
         </div>
       </div>
 
-      <div className="glass-panel" style={{padding: '1.5rem', marginBottom: '2rem'}}>
+      <div className="glass-panel" style={{padding: '1.5rem', marginBottom: '2rem', display: 'flex', gap: '1rem'}}>
         <input 
           type="text" 
           className="form-input" 
           placeholder="Search by name, father name, or class..." 
+          style={{flex: 2}}
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
+        <select 
+          className="form-input" 
+          style={{flex: 1}}
+          value={selectedClassId}
+          onChange={(e) => { setSelectedClassId(e.target.value); setPage(1); }}
+        >
+          <option value="all">All Classes</option>
+          {classes.map(c => (
+            <option key={c.id} value={c.id}>{c.name} {c.section ? `- ${c.section}` : ''}</option>
+          ))}
+        </select>
       </div>
 
       <div className="glass-panel table-container">

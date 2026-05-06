@@ -306,11 +306,6 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
   .print-only { display: none !important; }
 }
 @media print {
-  @page {
-    size: A4 landscape;
-    margin: 0mm;
-  }
-  
   body, html {
     background: white !important;
     color: black !important;
@@ -342,37 +337,54 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
     padding: 0 !important;
   }
 
-  .voucher-card {
-    background: #fff !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: none !important;
-    width: 100% !important;
-    height: 207mm !important;
-    display: flex !important;
-    flex-direction: row !important;
-    overflow: hidden !important;
-    page-break-after: always;
-    page-break-inside: avoid;
-    box-sizing: border-box !important;
-  }
-
-  .voucher-copy {
-    flex: 1 1 0% !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    height: 100% !important;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
-    padding: 6mm 5mm !important;
-  }
-
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 }
+
+/* Responsive Enhancements */
+@media (max-width: 1024px) {
+  .dashboard-layout {
+    flex-direction: column !important;
+  }
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    position: relative !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    padding: 1rem !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    gap: 0.5rem !important;
+    z-index: 10 !important;
+  }
+  .sidebar-link {
+    padding: 0.5rem 1rem !important;
+    font-size: 0.85rem !important;
+    display: inline-block !important;
+  }
+  .main-content {
+    padding: 1rem !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+}
+
+@media (max-width: 768px) {
+  h1 { font-size: 1.5rem; }
+  .main-content {
+    padding: 1rem;
+  }
+  .glass-panel {
+    padding: 1rem !important;
+  }
+  .btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }
+}
+
 

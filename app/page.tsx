@@ -25,7 +25,8 @@ export default function Dashboard() {
 
       const [feesRes, studentsRes, expRes, salRes] = await Promise.all([
         fetch('/api/fees', { cache: 'no-store' }),
-        fetch('/api/students', { cache: 'no-store' }),
+        fetch('/api/students?limit=5000', { cache: 'no-store' }),
+
         fetch('/api/expenses', { cache: 'no-store' }),
         fetch('/api/salaries', { cache: 'no-store' }) 
       ]);
@@ -60,7 +61,7 @@ export default function Dashboard() {
 
     const allTimeAC = students.reduce((a, s: any) => a + (s.paidAnnualCharges || 0), 0);
     
-    const targetFees = fees.filter((f: any) => f.status === 'Paid' && isPaidInTargetRange(f.paymentDate));
+    const targetFees = fees.filter((f: any) => (f.status === 'Paid' || f.status === 'Partially Paid') && isPaidInTargetRange(f.paymentDate));
     // User wants ONLY Tuition from the filtered fees (Monthly or All-time)
     const tuitionIn = targetFees.reduce((a, c: any) => a + (c.isACOnly ? 0 : (c.paidTuition || c.amount || 0)), 0);
     
@@ -84,14 +85,16 @@ export default function Dashboard() {
       acIn: allTimeAC,
       tuitionIn,
       expenses: targetExps + targetSals,
-      expected
+      expected,
+      pending: (fees.reduce((a, c) => a + ((c.amount || 0) - (c.paidTuition || 0)), 0)) + 
+               (students.reduce((a, s) => a + ((s.annualCharges || 0) - (s.paidAnnualCharges || 0)), 0))
     };
   };
 
   const metrics = calculateMetrics();
   
   const unifiedLogs = [
-    ...data.fees.filter((f: any) => f.status === 'Paid').map((f: any) => ({
+    ...data.fees.filter((f: any) => f.status === 'Paid' || f.status === 'Partially Paid').map((f: any) => ({
       id: `fee-${f.id}`,
       type: 'INCOME',
       category: f.month === 'Annual Charges' ? 'Annual Charges' : 'Fee',

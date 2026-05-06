@@ -1,0 +1,171 @@
+/* Fee Collection / Receipt specific styles */
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 5mm;
+  }
+
+  .no-print { display: none !important; }
+
+  .receipt-container {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: white !important;
+    color: #1e3a8a !important;
+    overflow-x: auto !important;
+  }
+}
+
+/* Mobile Friendly Container */
+@media (max-width: 768px) {
+  .receipt-container {
+    overflow-x: auto;
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .physical-receipt {
+    min-width: 600px; /* Ensures receipt structure stays intact while scrolling */
+    transform-origin: top left;
+  }
+}
+
+.physical-receipt {
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #1e3a8a;
+  padding: 1rem;
+  background: #fff;
+  position: relative;
+  border: 1px solid #e2e8f0;
+}
+
+.receipt-header-main {
+  text-align: center;
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: #1e3a8a;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+  letter-spacing: -1px;
+}
+
+.campus-grid {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.campus-item {
+  border: 1.5px solid #ef4444;
+  border-radius: 12px;
+  padding: 5px 15px;
+  text-align: center;
+  color: #ef4444;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.contact-header-bar {
+  background: #3730a3;
+  color: white;
+  border-radius: 25px;
+  padding: 6px 25px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 10px;
+}
+
+.info-row {
+  display: flex;
+  margin-bottom: 8px;
+  border-bottom: 1.5px solid #3730a3;
+  padding-bottom: 2px;
+}
+
+.info-label {
+  font-weight: 800;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.info-value {
+  flex: 1;
+  font-weight: 600;
+}
+
+.particulars-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  border: 2px solid #3730a3;
+}
+
+.particulars-table th {
+  background: #f8fafc;
+  border: 2px solid #3730a3;
+  padding: 5px;
+  text-align: center;
+  font-weight: 900;
+  font-size: 1.1rem;
+}
+
+.particulars-table td {
+  border: 1.5px solid #3730a3;
+  padding: 4px 10px;
+  font-weight: 700;
+}
+
+.calculation-box {
+  width: 200px;
+  border: 2px solid #3730a3;
+  margin-left: auto;
+}
+
+.calc-row {
+  display: flex;
+  border-bottom: 1.5px solid #3730a3;
+}
+
+.calc-row:last-child { border-bottom: none; }
+
+.calc-label {
+  flex: 1;
+  padding: 5px 10px;
+  font-weight: 800;
+  border-right: 1.5px solid #3730a3;
+}
+
+.calc-value {
+  width: 100px;
+  padding: 5px 10px;
+  text-align: right;
+  font-weight: 800;
+}
+
+.calc-row.balance-row {
+  background: #3730a3;
+  color: white;
+}
+
+.signature-section {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.sig-item {
+  width: 40%;
+  border-top: 1.5px solid #3730a3;
+  text-align: center;
+  padding-top: 5px;
+  font-weight: 800;
+}
+

@@ -1,26 +1,63 @@
 [
   {
     "id": 1,
-    "name": "Class One",
-    "section": "Blue",
-    "createdAt": "2026-04-25T03:51:11.294Z"
+    "name": "5th",
+    "section": "A",
+    "createdAt": "2026-04-28T06:51:55.741Z",
+    "updatedAt": "2026-05-05T08:55:45.294Z"
   },
   {
     "id": 2,
-    "name": "Class 1",
-    "section": "blue",
-    "createdAt": "2026-05-04T18:32:30.365Z"
+    "name": "5th ",
+    "section": "B",
+    "createdAt": "2026-04-28T06:52:05.539Z"
   },
   {
     "id": 3,
-    "name": "Class 2",
-    "section": "green",
-    "createdAt": "2026-05-04T18:32:41.588Z"
+    "name": "6th ",
+    "section": "A",
+    "createdAt": "2026-04-28T06:52:15.043Z"
   },
   {
     "id": 4,
-    "name": "Class 3",
-    "section": "Yellow",
-    "createdAt": "2026-05-04T18:32:54.877Z"
+    "name": "6th ",
+    "section": "B",
+    "createdAt": "2026-04-28T06:52:23.372Z"
+  },
+  {
+    "id": 5,
+    "name": "7th",
+    "section": "A",
+    "createdAt": "2026-04-28T06:52:37.906Z"
+  },
+  {
+    "id": 6,
+    "name": "7th",
+    "section": "B",
+    "createdAt": "2026-04-28T06:52:47.723Z"
+  },
+  {
+    "id": 7,
+    "name": "Pre 9th ",
+    "section": "A",
+    "createdAt": "2026-04-28T06:53:06.896Z"
+  },
+  {
+    "id": 8,
+    "name": "Pre 9th ",
+    "section": "B",
+    "createdAt": "2026-04-28T06:53:24.697Z"
+  },
+  {
+    "id": 12,
+    "name": "9th",
+    "section": "A",
+    "createdAt": "2026-04-30T05:16:29.235Z"
+  },
+  {
+    "id": 13,
+    "name": "9th ",
+    "section": "B",
+    "createdAt": "2026-04-30T05:36:06.125Z"
   }
 ]
