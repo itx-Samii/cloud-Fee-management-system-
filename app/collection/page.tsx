@@ -23,10 +23,6 @@ export default function FeeCollection() {
 
   // Pre-fetch all fees for rapid typeahead searching
   useEffect(() => {
-    fetch('/api/fees', { cache: 'no-store' }).then(r => r.json()).then(data => {
-      setAllFees(data || []);
-    }).catch(console.error);
-
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowDropdown(false);
@@ -54,20 +50,22 @@ export default function FeeCollection() {
     localStorage.setItem('fms-school-address', text);
   };
 
-  const handleSearchChange = (val: string) => {
+  const handleSearchChange = async (val: string) => {
     setSearch(val);
     setFeeData(null);
     setErrorMsg('');
 
-    if (val.trim().length > 0) {
-      const match = allFees.filter(f => 
-        (f.studentName?.toLowerCase().includes(val.toLowerCase()) ||
-        f.fatherName?.toLowerCase().includes(val.toLowerCase()) ||
-        f.id.toString() === val) &&
-        f.month !== 'Annual Charges' // Hide Annual Charges from this list
-      );
-      setSuggestions(match.slice(0, 8)); // top 8 matches
-      setShowDropdown(true);
+    if (val.trim().length > 1) {
+      try {
+        const res = await fetch(`/api/fees?search=${encodeURIComponent(val)}&limit=8`);
+        if (res.ok) {
+          const data = await res.json();
+          setSuggestions(Array.isArray(data) ? data : []);
+          setShowDropdown(true);
+        }
+      } catch (err) {
+        console.error("Suggestion error:", err);
+      }
     } else {
       setShowDropdown(false);
     }
@@ -89,19 +87,40 @@ export default function FeeCollection() {
     setErrorMsg('');
     setFeeData(null);
     try {
-      const found = allFees.find((f: any) => 
-        f.id.toString() === search.toString()
-      );
-
-      if (found) {
-        setFeeData(found);
-        setPaidTuition(found.amount.toString());
-        setPaidAC((found.remainingAnnualCharges || 0).toString());
-      } else {
-        setErrorMsg("No active billing voucher found for this ID.");
+      // 1. Search by ID first (Direct API call)
+      if (!isNaN(Number(search))) {
+        const res = await fetch(`/api/fees?id=${search}`);
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.id ? [data] : []);
+          if (list.length > 0) {
+             setFeeData(list[0]);
+             setPaidTuition(list[0].amount.toString());
+             setPaidAC((list[0].remainingAnnualCharges || 0).toString());
+             setLoading(false);
+             return;
+          }
+        }
       }
-    } catch {
-      setErrorMsg("System offline or error.");
+
+      // 2. Search by Name (API call with search param)
+      const res = await fetch(`/api/fees?search=${encodeURIComponent(search)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const results = Array.isArray(data) ? data : [];
+        if (results.length > 0) {
+          setFeeData(results[0]);
+          setPaidTuition(results[0].amount.toString());
+          setPaidAC((results[0].remainingAnnualCharges || 0).toString());
+        } else {
+          setErrorMsg("No active billing voucher found.");
+        }
+      } else {
+        setErrorMsg("Search failed. Please check connection.");
+      }
+    } catch (error: any) {
+      console.error("Search error:", error);
+      setErrorMsg(`Search failed: ${error.message || 'Check your internet or server'}`);
     } finally {
       setLoading(false);
     }

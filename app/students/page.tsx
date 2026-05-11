@@ -36,7 +36,7 @@ export default function StudentsDirectory() {
       const classQuery = selectedClassId !== 'all' ? `&classId=${selectedClassId}` : '';
       const res = await fetch(`/api/students?page=${page}&limit=20&search=${search}${classQuery}`, { cache: 'no-store' });
       const data = await res.json();
-      setStudents(data.data || []);
+      setStudents(data.students || []);
       setTotalPages(data.totalPages || 1);
       setTotalRecords(data.total || 0);
     } catch {

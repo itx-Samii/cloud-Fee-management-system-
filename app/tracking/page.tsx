@@ -61,9 +61,11 @@ export default function ClassWiseTracking() {
         fetch(`/api/students?classId=${classId}&limit=1000`, { cache: 'no-store' })
       ]);
       
-      const fees = await feesRes.json();
+      let fees = await feesRes.json();
+      if (!Array.isArray(fees)) fees = [];
+      
       const studentData = await studentsRes.json();
-      const studentsOfClass = studentData.data || [];
+      const studentsOfClass = studentData.students || [];
       
       const merged = studentsOfClass.map((student: any) => {
         const feeRecord = fees.find((f: any) => f.studentId === student.id);
@@ -87,8 +89,9 @@ export default function ClassWiseTracking() {
 
       setTrackingData(merged);
       return merged;
-    } catch {
-      alert("Failed to load tracking data");
+    } catch (err: any) {
+      console.error("Tracking Fetch Error:", err);
+      alert(`Failed to load tracking data: ${err.message || 'Unknown error'}`);
       return [];
     } finally {
       setLoading(false);
@@ -147,7 +150,11 @@ export default function ClassWiseTracking() {
         const res = await fetch('/api/fees', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ month, year })
+          body: JSON.stringify({ 
+            month, 
+            year,
+            studentIds: [student.id]
+          })
         });
         if (res.ok) {
           // Re-fetch again to get the new voucher ID after creation

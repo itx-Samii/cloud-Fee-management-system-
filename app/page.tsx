@@ -32,11 +32,11 @@ export default function Dashboard() {
       ]);
       
       const fees = feesRes.ok ? await feesRes.json() : [];
-      const sr = studentsRes.ok ? await studentsRes.json() : {total:0, data:[]};
+      const sr = studentsRes.ok ? await studentsRes.json() : {total:0, students:[]};
       const exps = expRes.ok ? await expRes.json() : [];
       const sals = salRes.ok ? await salRes.json() : [];
       
-      setData({ fees, students: sr.data || [], expenses: exps, salaries: sals });
+      setData({ fees, students: sr.students || [], expenses: exps, salaries: sals });
     } catch (err) {
       console.error("Dashboard error", err);
     } finally {

@@ -1,55 +1,38 @@
 import { NextResponse } from 'next/server';
-import { readData, writeData, generateId } from '@/lib/fileHandler';
+import { adminDb } from '@/lib/firebase-admin';
 
-// --- TypeScript Interface ---
-interface Expense {
-  id: number;
-  category: string;
-  amount: number;
-  description: string;
-  date: string;
-}
+export const dynamic = 'force-dynamic';
 
-const FILE_NAME = 'expenses.json';
-
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const expenses = await readData<Expense>(FILE_NAME);
+    const snapshot = await adminDb.collection('expenses').orderBy('date', 'desc').get();
+    const expenses = snapshot.docs.map(doc => ({ ...doc.data() }));
     return NextResponse.json(expenses);
-  } catch (err) {
-    return NextResponse.json({ error: 'Failed to fetch' }, { status: 500 });
+  } catch (err: any) {
+    console.error("Admin SDK Expenses GET Error:", err);
+    return NextResponse.json({ error: 'Failed to fetch expenses' }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    
+    const snapshot = await adminDb.collection('expenses').get();
+    let maxId = 0;
+    snapshot.forEach(doc => {
+      const id = parseInt(doc.id);
+      if (id > maxId) maxId = id;
+    });
 
-    // Input validation
-    if (!body.category || typeof body.category !== 'string' || body.category.trim().length === 0) {
-      return NextResponse.json({ error: 'Category is required' }, { status: 400 });
-    }
-    if (!body.amount || isNaN(Number(body.amount)) || Number(body.amount) <= 0) {
-      return NextResponse.json({ error: 'Amount must be a positive number' }, { status: 400 });
-    }
-
-    const expenses = await readData<Expense>(FILE_NAME);
-    const id = await generateId(FILE_NAME);
+    const newId = maxId + 1;
+    const newExpense = { ...body, id: newId };
     
-    const newExpense: Expense = { 
-      id, 
-      category: body.category.trim(),
-      amount: parseFloat(body.amount) || 0,
-      description: body.description?.trim() || '',
-      date: body.date || new Date().toISOString()
-    };
-    
-    expenses.push(newExpense);
-    await writeData(FILE_NAME, expenses);
-    
+    await adminDb.collection('expenses').doc(newId.toString()).set(newExpense);
     return NextResponse.json(newExpense);
-  } catch (err) {
-    return NextResponse.json({ error: 'Failed' }, { status: 500 });
+  } catch (err: any) {
+    console.error("Admin SDK Expenses POST Error:", err);
+    return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 });
   }
 }
 
@@ -57,18 +40,12 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'ID missing' }, { status: 400 });
+    if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
-    const expenses = await readData<Expense>(FILE_NAME);
-    const filtered = expenses.filter((e) => e.id.toString() !== id.toString());
-
-    if (filtered.length === expenses.length) {
-      return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
-    }
-
-    await writeData(FILE_NAME, filtered);
+    await adminDb.collection('expenses').doc(id).delete();
     return NextResponse.json({ success: true });
-  } catch (err) {
-    return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+  } catch (err: any) {
+    console.error("Admin SDK Expenses DELETE Error:", err);
+    return NextResponse.json({ error: 'Failed to delete expense' }, { status: 500 });
   }
 }

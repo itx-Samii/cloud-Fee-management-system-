@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SECURITY (DO NOT COMMIT DATABASE KEYS)
+serviceAccountKey.json
+
+# Local scripts
+*.js

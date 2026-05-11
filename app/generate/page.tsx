@@ -52,7 +52,7 @@ export default function GenerateFees() {
   const fetchMonthFees = async (m = currentMonth, y = currentYear) => {
     const res = await fetch(`/api/fees?month=${m}&year=${y}`, { cache: 'no-store' });
     const data = await res.json();
-    setFees(data || []);
+    setFees(Array.isArray(data) ? data : []);
   };
 
   const [classes, setClasses] = useState<any[]>([]);
@@ -138,11 +138,14 @@ export default function GenerateFees() {
 
   const [selectedClass, setSelectedClass] = useState('all');
 
-  const filteredFees = fees.filter(f => {
-    const matchesSearch = f.studentName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                         f.fatherName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         f.id.toString() === searchQuery;
-    const matchesClass = selectedClass === 'all' || f.className === selectedClass;
+  const filteredFees = (fees || []).filter(f => {
+    const matchesSearch = (f.studentName || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         (f.fatherName || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         (f.id || "").toString() === searchQuery;
+    
+    // Flexible class match (trimming both sides)
+    const matchesClass = selectedClass === 'all' || 
+                         (f.className || "").toString().trim() === selectedClass.trim();
     return matchesSearch && matchesClass;
   });
 
