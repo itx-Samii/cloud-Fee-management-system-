@@ -10,6 +10,22 @@ function initFirebase() {
       console.log("Loading Service Account from individual Environment Variables...");
       
       let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      
+      // If the user accidentally pasted the entire JSON object into the FIREBASE_PRIVATE_KEY field
+      if (privateKey.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(privateKey);
+          if (parsed.private_key) {
+            privateKey = parsed.private_key;
+            // Also grab other values if they exist in the JSON
+            if (!process.env.FIREBASE_PROJECT_ID && parsed.project_id) process.env.FIREBASE_PROJECT_ID = parsed.project_id;
+            if (!process.env.FIREBASE_CLIENT_EMAIL && parsed.client_email) process.env.FIREBASE_CLIENT_EMAIL = parsed.client_email;
+          }
+        } catch (e) {
+          console.warn("Failed to parse FIREBASE_PRIVATE_KEY as JSON, using as string.");
+        }
+      }
+
       // Handle both literal newlines and escaped newlines from Vercel
       if (privateKey.includes('\\n')) {
         privateKey = privateKey.replace(/\\n/g, '\n');

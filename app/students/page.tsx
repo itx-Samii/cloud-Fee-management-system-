@@ -20,7 +20,8 @@ export default function StudentsDirectory() {
     try {
       const res = await fetch('/api/classes');
       const data = await res.json();
-      setClasses(data || []);
+      setClasses(Array.isArray(data) ? data : []);
+      if (data?.error) console.error("API Error:", data.details || data.error);
     } catch {
       console.error("Failed to fetch classes");
     }
@@ -36,7 +37,8 @@ export default function StudentsDirectory() {
       const classQuery = selectedClassId !== 'all' ? `&classId=${selectedClassId}` : '';
       const res = await fetch(`/api/students?page=${page}&limit=20&search=${search}${classQuery}`, { cache: 'no-store' });
       const data = await res.json();
-      setStudents(data.students || []);
+      setStudents(Array.isArray(data.students) ? data.students : []);
+      if (data.error) console.error("API Error:", data.details || data.error);
       setTotalPages(data.totalPages || 1);
       setTotalRecords(data.total || 0);
     } catch {
