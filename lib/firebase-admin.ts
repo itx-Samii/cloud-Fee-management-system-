@@ -4,7 +4,18 @@ import fs from 'fs';
 
 if (!admin.apps.length) {
   try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    if (process.env.FIREBASE_PRIVATE_KEY) {
+      console.log("Loading Service Account from individual Environment Variables...");
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // Handle cases where the private key newlines are escaped as string literal \n
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        })
+      });
+      console.log("✅ FIREBASE ADMIN: Successfully initialized using individual Environment Variables");
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       console.log("Loading Service Account from Environment Variable...");
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       admin.initializeApp({
