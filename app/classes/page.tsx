@@ -10,7 +10,9 @@ export default function ClassesHub() {
 
   const fetchClasses = async () => {
     try {
-      const res = await fetch('/api/classes');
+      const res = await fetch('/api/classes?_t=' + Date.now(), {
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
       const data = await res.json();
       setClasses(data || []);
     } catch {
