@@ -99,6 +99,7 @@ export async function PUT(request: Request) {
     const cleanUpdateData = {
       name: updateData.name,
       fatherName: updateData.fatherName,
+      classId: updateData.classId !== undefined ? updateData.classId?.toString() : undefined,
       monthlyFee: updateData.monthlyFee !== undefined ? parseFloat(updateData.monthlyFee) : undefined,
       discount: updateData.discount !== undefined ? parseFloat(updateData.discount) : undefined,
       admissionNumber: updateData.admissionNumber,
@@ -116,11 +117,12 @@ export async function PUT(request: Request) {
     students[sIndex] = { ...students[sIndex], ...cleanUpdateData };
     await writeData('students.json', students, schoolId);
 
-    const syncFields = ['monthlyFee', 'discount', 'annualCharges', 'name', 'fatherName', 'admissionNumber'];
+    const syncFields = ['monthlyFee', 'discount', 'annualCharges', 'name', 'fatherName', 'admissionNumber', 'classId'];
     const changed = syncFields.some(f => updateData[f] !== undefined);
     
     if (changed) {
       const fees = await readData<any>('fees.json', schoolId);
+      const classes = await readData<any>('classes.json', schoolId);
       let feesModified = false;
 
       for (let i = 0; i < fees.length; i++) {
@@ -133,6 +135,13 @@ export async function PUT(request: Request) {
           if (updateData.name !== undefined) fees[i].studentName = updateData.name;
           if (updateData.fatherName !== undefined) fees[i].fatherName = updateData.fatherName;
           if (updateData.admissionNumber !== undefined) fees[i].admissionNumber = updateData.admissionNumber;
+          if (updateData.classId !== undefined) {
+            const cObj = classes.find((c: any) => c.id?.toString() === updateData.classId?.toString());
+            fees[i].classId = updateData.classId?.toString();
+            if (cObj) {
+              fees[i].className = `${cObj.name}${cObj.section ? ' - ' + cObj.section : ''}`;
+            }
+          }
           
           feesModified = true;
         }
