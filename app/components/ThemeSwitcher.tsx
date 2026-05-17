@@ -26,7 +26,7 @@ export default function ThemeSwitcher() {
   };
 
   return (
-    <div style={{marginTop: 'auto', paddingTop: '2rem', borderTop: '1px solid var(--border)'}}>
+    <div className="theme-switcher-box">
       <p style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600}}>SYSTEM THEME</p>
       <select 
         value={theme}

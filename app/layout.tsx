@@ -27,7 +27,7 @@ export default function RootLayout({
       <body className="dashboard-layout" suppressHydrationWarning>
         <AuthGuard />
         <LicenseGuard />
-        <aside className="sidebar no-print" style={{position: 'fixed', left: 0, top: 0, bottom: 0, overflowY: 'auto', overflowX: 'hidden'}}>
+        <aside className="sidebar no-print">
           <div>
             <h2 style={{color: 'var(--primary)', marginBottom: '0.25rem'}}>School Pay</h2>
             <p style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>Fee Management System</p>
@@ -35,7 +35,7 @@ export default function RootLayout({
           <SidebarNav />
           <ThemeSwitcher />
         </aside>
-        <main className="main-content" style={{marginLeft: '260px', width: 'calc(100% - 260px)'}}>
+        <main className="main-content">
           <ErrorBoundary>
             {children}
           </ErrorBoundary>
