@@ -8,6 +8,10 @@ export async function GET() {
   try {
     let expenses = await readData<any>('expenses.json', schoolId);
     if (!Array.isArray(expenses)) expenses = [];
+    expenses = expenses.map((e: any) => ({
+      ...e,
+      date: e.date || new Date().toISOString()
+    }));
     expenses.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
     return NextResponse.json(expenses);
   } catch (err: any) {
@@ -24,7 +28,12 @@ export async function POST(request: Request) {
     const expenses = await readData<any>('expenses.json', schoolId);
     const newId = await generateId('expenses.json', schoolId);
 
-    const newExpense = { ...body, id: newId, schoolId };
+    const newExpense = { 
+      ...body, 
+      id: newId, 
+      schoolId,
+      date: body.date || new Date().toISOString()
+    };
     
     expenses.push(newExpense);
     await writeData('expenses.json', expenses, schoolId);

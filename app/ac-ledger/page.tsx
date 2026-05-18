@@ -162,17 +162,17 @@ export default function ACLedger() {
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Total AC Goal</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0}}>Rs. {filtered.reduce((sum, s) => sum + (s.annualCharges || 0), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(s.annualCharges) || 0), 0).toLocaleString()}</h2>
         </div>
         
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--success)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Total Collected AC</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--success)'}}>Rs. {filtered.reduce((sum, s) => sum + (s.paidAnnualCharges || 0), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--success)'}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(s.paidAnnualCharges) || 0), 0).toLocaleString()}</h2>
         </div>
 
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--danger)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Outstanding AC</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--danger)'}}>Rs. {filtered.reduce((sum, s) => sum + ((s.annualCharges || 0) - (s.paidAnnualCharges || 0)), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--danger)'}}>Rs. {filtered.reduce((sum, s) => sum + ((parseFloat(s.annualCharges) || 0) - (parseFloat(s.paidAnnualCharges) || 0)), 0).toLocaleString()}</h2>
         </div>
       </div>
 

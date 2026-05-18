@@ -272,7 +272,7 @@ export default function SalaryManagement() {
             </div>
             <div style={{flex: 1, textAlign: 'right'}}>
               <div style={{color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600}}>Total Monthly Payroll</div>
-              <div style={{fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)'}}>Rs. {history.reduce((a, b) => a + b.amount, 0)}</div>
+              <div style={{fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)'}}>Rs. {history.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0)}</div>
             </div>
           </div>
 

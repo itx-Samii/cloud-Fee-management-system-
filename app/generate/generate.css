@@ -1,10 +1,17 @@
 /* Bulk Challan Generation specific styles */
 
+@media screen {
+  .print-only { display: none !important; }
+}
+
 @media print {
   @page {
     size: A4 landscape !important;
     margin: 5mm !important;
   }
+
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
 
   .voucher-card {
     background: #fff !important;
@@ -16,15 +23,15 @@
     display: flex !important;
     flex-direction: row !important;
     overflow: hidden !important;
-    page-break-after: always;
-    page-break-inside: avoid;
+    page-break-after: always !important;
+    page-break-inside: avoid !important;
     box-sizing: border-box !important;
   }
 
   .voucher-copy {
-    flex: 1 1 0% !important;
-    width: 0 !important;
-    min-width: 0 !important;
+    flex: 1 !important;
+    width: 33.33% !important;
+    max-width: 33.33% !important;
     height: 100% !important;
     box-sizing: border-box !important;
     overflow: hidden !important;
@@ -32,10 +39,6 @@
     flex-direction: column !important;
     justify-content: space-between !important;
     padding: 4mm 5mm !important;
-  }
-
-  /* Ensure main text is black, but allow overrides (like the white Total text) */
-  .voucher-copy {
     color: #000 !important;
     position: relative !important;
   }

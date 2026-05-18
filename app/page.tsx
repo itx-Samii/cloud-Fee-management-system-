@@ -59,23 +59,23 @@ export default function Dashboard() {
         return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     };
 
-    const allTimeAC = students.reduce((a, s: any) => a + (s.paidAnnualCharges || 0), 0);
+    const allTimeAC = students.reduce((a, s: any) => a + (parseFloat(s.paidAnnualCharges) || 0), 0);
     
     const targetFees = fees.filter((f: any) => (f.status === 'Paid' || f.status === 'Partially Paid') && isPaidInTargetRange(f.paymentDate));
     // User wants ONLY Tuition from the filtered fees (Monthly or All-time)
-    const tuitionIn = targetFees.reduce((a, c: any) => a + (c.isACOnly ? 0 : (c.paidTuition || c.amount || 0)), 0);
+    const tuitionIn = targetFees.reduce((a, c: any) => a + (c.isACOnly ? 0 : (parseFloat(c.paidTuition) || parseFloat(c.amount) || 0)), 0);
     
     // Monthly Gross = All Time AC + Selected Tuition (User's specific formula)
     const gross = allTimeAC + tuitionIn;
 
     // Expenses (Filter out manual 'Salary' entries to prevent double counting with formal salaries)
     const targetExps = expenses.filter((e: any) => isPaidInTargetRange(e.date) && e.category?.toLowerCase() !== 'salary')
-                               .reduce((a, c: any) => a + (c.amount || 0), 0);
-    const targetSals = salaries.filter((s: any) => isPaidInTargetRange(s.paymentDate)).reduce((a, c: any) => a + (c.amount || 0), 0);
+                               .reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0);
+    const targetSals = salaries.filter((s: any) => isPaidInTargetRange(s.paymentDate)).reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0);
 
     const currentMonthBilled = fees.filter((f: any) => f.month === now.toLocaleString('default', { month: 'long' }) && f.year === now.getFullYear().toString())
-                                   .reduce((a: number, c: any) => a + (c.amount || 0), 0);
-    const totalBilled = fees.reduce((a, c: any) => a + (c.amount || 0), 0) + students.reduce((a, s: any) => a + (s.annualCharges || 0), 0);
+                                   .reduce((a: number, c: any) => a + (parseFloat(c.amount) || 0), 0);
+    const totalBilled = fees.reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0) + students.reduce((a, s: any) => a + (parseFloat(s.annualCharges) || 0), 0);
 
     const expected = (viewMode === 'all-time') ? totalBilled : currentMonthBilled;
 
@@ -86,8 +86,8 @@ export default function Dashboard() {
       tuitionIn,
       expenses: targetExps + targetSals,
       expected,
-      pending: (fees.reduce((a, c) => a + ((c.amount || 0) - (c.paidTuition || 0)), 0)) + 
-               (students.reduce((a, s) => a + ((s.annualCharges || 0) - (s.paidAnnualCharges || 0)), 0))
+      pending: (fees.reduce((a, c) => a + ((parseFloat(c.amount) || 0) - (parseFloat(c.paidTuition) || 0)), 0)) + 
+               (students.reduce((a, s) => a + ((parseFloat(s.annualCharges) || 0) - (parseFloat(s.paidAnnualCharges) || 0)), 0))
     };
   };
 
@@ -100,7 +100,7 @@ export default function Dashboard() {
       category: f.month === 'Annual Charges' ? 'Annual Charges' : 'Fee',
       title: f.studentName || 'Student Payment',
       amount: f.totalReceived || f.amount,
-      date: f.paymentDate,
+      date: f.paymentDate || f.date || new Date().toISOString(),
     })),
     ...data.expenses.map((e: any) => ({
       id: `exp-${e.id}`,
@@ -108,7 +108,7 @@ export default function Dashboard() {
       category: e.category || 'General',
       title: e.description || 'Expense',
       amount: e.amount,
-      date: e.date,
+      date: e.date || new Date().toISOString(),
     })),
     ...data.salaries.map((s: any) => ({
       id: `sal-${s.id}`,
@@ -116,9 +116,9 @@ export default function Dashboard() {
       category: 'Salary',
       title: s.staffName || `Staff ID: ${s.staffId}`,
       amount: s.amount,
-      date: s.paymentDate,
+      date: s.paymentDate || s.date || new Date().toISOString(),
     }))
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
    .slice(0, 10);
 
   return (
@@ -226,7 +226,7 @@ export default function Dashboard() {
                       )}
                    </td>
                    <td style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>{log.category}</td>
-                   <td style={{fontSize: '0.9rem'}}>{new Date(log.date).toLocaleDateString()}</td>
+                   <td style={{fontSize: '0.9rem'}}>{new Date(log.date || new Date()).toLocaleDateString('en-GB')}</td>
                    <td style={{fontWeight: 700, color: log.type === 'INCOME' ? 'var(--success)' : 'var(--danger)'}}>
                       {log.type === 'INCOME' ? '+' : '-'} Rs. {log.amount}
                    </td>

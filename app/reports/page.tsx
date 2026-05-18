@@ -64,8 +64,8 @@ export default function CollectionReports() {
     return matchSearch && matchClass && matchMonth && matchYear && matchStatus && isNotACOnly;
   });
 
-  const totalBilled = filteredFees.reduce((acc, f) => acc + (f.amount || 0), 0);
-  const totalCollected = filteredFees.reduce((acc, f) => acc + (f.status === 'Paid' ? (f.paidTuition || f.amount || 0) : 0), 0);
+  const totalBilled = filteredFees.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
+  const totalCollected = filteredFees.reduce((acc, f) => acc + (f.status === 'Paid' ? (parseFloat(f.paidTuition) || parseFloat(f.amount) || 0) : 0), 0);
   const totalPending = Math.max(0, totalBilled - totalCollected); 
 
   return (

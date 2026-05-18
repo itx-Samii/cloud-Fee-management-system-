@@ -181,7 +181,7 @@ export default function GenerateFees() {
     }, 200);
   };
 
-  const calculateTotal = () => filteredFees.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const calculateTotal = () => filteredFees.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>

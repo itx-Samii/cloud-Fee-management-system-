@@ -39,10 +39,11 @@ export default function ExpenseManager() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    const payload = { ...formData, amount: parseFloat(formData.amount) || 0, date: new Date().toISOString() };
     await fetch('/api/expenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      body: JSON.stringify(payload)
     });
     setFormData({ category: 'Salary', amount: '', description: '' });
     fetchExpenses();
@@ -65,10 +66,10 @@ export default function ExpenseManager() {
 
   const allSpendingItems = [
     // Include manual expenses BUT ignore those with category 'Salary' to avoid table duplicates
-    ...expenses.filter(e => e.category?.toLowerCase() !== 'salary').map(e => ({ ...e, type: 'manual' })),
+    ...expenses.filter(e => e.category?.toLowerCase() !== 'salary').map(e => ({ ...e, type: 'manual', date: e.date || new Date().toISOString() })),
     ...salaries.map(s => ({ 
       id: `sal-${s.id}`, 
-      date: s.paymentDate, 
+      date: s.paymentDate || s.date || new Date().toISOString(), 
       category: '💰 Salary (Auto)', 
       description: `Payroll: ${s.staffName} (${s.month})`, 
       amount: s.amount,
@@ -77,7 +78,7 @@ export default function ExpenseManager() {
   ];
 
   const filteredItems = allSpendingItems.filter(e => {
-    const d = new Date(e.date);
+    const d = new Date(e.date || new Date());
     const mMatch = monthFilter === 'all' || d.getMonth() === parseInt(monthFilter);
     const yMatch = yearFilter === 'all' || d.getFullYear() === parseInt(yearFilter);
     return mMatch && yMatch;
@@ -86,17 +87,17 @@ export default function ExpenseManager() {
   const displayItems = filteredItems.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
   // Calculate total: Sum of currently filtered items
-  const filteredTotal = filteredItems.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const filteredTotal = filteredItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
   
   // By default (when no filters), show current month's total for the "Monthly Spending" box
   const currentMonthTotal = allSpendingItems.filter(e => {
-    const d = new Date(e.date);
+    const d = new Date(e.date || new Date());
     return d.getMonth() === currentMonthNum && d.getFullYear() === currentYearNum;
-  }).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  }).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
 
   const displayTotal = (monthFilter === 'all' && yearFilter === 'all') ? currentMonthTotal : filteredTotal;
 
-  const totalExpense = allSpendingItems.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const totalExpense = allSpendingItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
 
   const categories = ['Salary', 'Electricity Bill', 'Internet', 'Maintenance & Repairs', 'Stationery', 'Petrol/Fuel', 'Other'];
 
@@ -197,7 +198,7 @@ export default function ExpenseManager() {
                 ) : (
                   displayItems.map((e: any, idx: number) => (
                     <tr key={`exp_${e.id}_${idx}`} style={{background: e.type === 'auto' ? 'rgba(79, 70, 229, 0.05)' : 'transparent'}}>
-                      <td style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>{new Date(e.date).toLocaleDateString()}</td>
+                      <td style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>{new Date(e.date || new Date()).toLocaleDateString('en-GB')}</td>
                       <td><span className={`badge ${e.type === 'auto' ? 'badge-success' : 'badge-neutral'}`}>{e.category}</span></td>
                       <td>{e.description}</td>
                       <td style={{fontWeight: 700}}>Rs. {e.amount}</td>
