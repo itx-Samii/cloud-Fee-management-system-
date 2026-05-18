@@ -15,26 +15,29 @@
 
   .voucher-card {
     background: #fff !important;
+    color: #000 !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
     width: 100% !important;
     height: 195mm !important;
+    max-height: 195mm !important;
     display: flex !important;
     flex-direction: row !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     page-break-after: always !important;
     page-break-inside: avoid !important;
     box-sizing: border-box !important;
   }
 
   .voucher-copy {
-    flex: 1 !important;
+    flex: 1 1 0% !important;
     width: 33.33% !important;
     max-width: 33.33% !important;
-    height: 100% !important;
+    height: 195mm !important;
+    max-height: 195mm !important;
     box-sizing: border-box !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
@@ -60,10 +63,13 @@
   .voucher-content {
     position: relative;
     z-index: 1;
-    height: 100%;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: auto !important;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    color: #000 !important;
   }
 
   /* Professional Table Borders */
