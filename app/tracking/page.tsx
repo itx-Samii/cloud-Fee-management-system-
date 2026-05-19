@@ -131,7 +131,18 @@ export default function ClassWiseTracking() {
     setValidUntilDays(parseInt(localStorage.getItem('fms-valid-days') || '10'));
     setLateFine(parseInt(localStorage.getItem('fms-late-fine') || '500'));
 
+    // Inject dynamic @page style for A4 landscape
+    const styleEl = document.createElement('style');
+    styleEl.id = 'print-page-style-tracking';
+    styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 5mm !important; } }`;
+    document.head.appendChild(styleEl);
+
     fetchClasses();
+
+    return () => {
+      const el = document.getElementById('print-page-style-tracking');
+      if (el) el.remove();
+    };
   }, []);
 
   useEffect(() => {

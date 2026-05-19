@@ -30,12 +30,22 @@ export default function FeeCollection() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     
+    // Inject dynamic @page style for A4 portrait
+    const styleEl = document.createElement('style');
+    styleEl.id = 'print-page-style';
+    styleEl.innerHTML = `@media print { @page { size: A4 portrait !important; margin: 8mm !important; } }`;
+    document.head.appendChild(styleEl);
+
     setMounted(true);
     setSchoolName(localStorage.getItem('fms-school-name') || 'TRUST SCHOOL SYSTEM');
     setSchoolAddress(localStorage.getItem('fms-school-address') || 'Campus Address / Contact No');
     setLogo(localStorage.getItem('fms-school-logo') || '');
     
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      const el = document.getElementById('print-page-style');
+      if (el) el.remove();
+    };
   }, []);
 
   const handleSaveName = (e: React.FocusEvent<HTMLHeadingElement>) => {
