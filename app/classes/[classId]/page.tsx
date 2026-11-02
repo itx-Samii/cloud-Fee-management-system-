@@ -1,38 +1,41 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { chargesTotal } from '@/lib/fees';
+import ChargesEditor, { fromDrafts, toDrafts, type ChargeDraft } from '../../components/ChargesEditor';
+import { useFeatures } from '@/lib/useFeatures';
+import type { RecordId, SchoolClass, Student } from '@/lib/types';
+
+type ClassInfo = Pick<SchoolClass, 'name' | 'section'>;
+
+async function fetchClassInfo(classId: string): Promise<ClassInfo> {
+  const res = await fetch('/api/classes');
+  const data: SchoolClass[] = await res.json();
+  return data.find((c) => c.id.toString() === classId) || { name: `Class ${classId}`, section: '' };
+}
 
 export default function ClassDetails() {
   const params = useParams();
   const classId = params.classId as string;
 
-  const [students, setStudents] = useState<any[]>([]);
-  const [classInfo, setClassInfo] = useState<any>(null);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
+  const [editingId, setEditingId] = useState<RecordId | null>(null);
+  const [formData, setFormData] = useState({ name: '', fatherName: '', parentPhone: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
+  const [monthlyCharges, setMonthlyCharges] = useState<ChargeDraft[]>([]);
+  const { has } = useFeatures();
 
-  const fetchClassDetails = async () => {
-    try {
-      const res = await fetch('/api/classes');
-      const data = await res.json();
-      const current = data.find((c: any) => c.id.toString() === classId);
-      setClassInfo(current || { name: `Class ${classId}`, section: '' });
-    } catch {
-      console.error("Failed to load class specifics");
-    }
-  };
-
-  const fetchStudents = async () => {
+  const fetchStudents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/students?page=${page}&limit=20&search=${search}&classId=${classId}`);
+      const res = await fetch(`/api/students?page=${page}&limit=20&search=${encodeURIComponent(search)}&classId=${classId}`);
       const data = await res.json();
       setStudents(data.data || []);
       setTotalPages(data.totalPages || 1);
@@ -41,10 +44,10 @@ export default function ClassDetails() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, page, classId]);
 
   useEffect(() => {
-    fetchClassDetails();
+    fetchClassInfo(classId).then(setClassInfo).catch(() => console.error("Failed to load class specifics"));
   }, [classId]);
 
   useEffect(() => {
@@ -52,21 +55,23 @@ export default function ClassDetails() {
       fetchStudents();
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [search, page, classId]);
+  }, [fetchStudents]);
 
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
       name: formData.name,
       fatherName: formData.fatherName,
+      parentPhone: formData.parentPhone,
       admissionNumber: formData.admissionNumber || undefined,
       classId: classId,
       monthlyFee: parseFloat(formData.monthlyFee || '0'),
       discount: parseFloat(formData.discount || '0'),
+      monthlyCharges: has('charges') ? fromDrafts(monthlyCharges) : undefined,
       annualCharges: parseFloat(formData.annualCharges || '0'),
       paidAnnualCharges: editingId ? undefined : 0,
-      status: 'Active',
-      ...(editingId ? { id: editingId } : {})
+      // Editing here leaves enrolment alone; it is changed on the All Students page.
+      ...(editingId ? { id: editingId } : { status: 'Active' })
     };
 
     const res = await fetch('/api/students', {
@@ -78,27 +83,30 @@ export default function ClassDetails() {
     if (res.ok) {
       setShowModal(false);
       setEditingId(null);
-      setFormData({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
+      setFormData({ name: '', fatherName: '', parentPhone: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
+      setMonthlyCharges([]);
       fetchStudents();
     } else {
-      alert("Failed to save.");
+      alert((await res.json().catch(() => null))?.error || "Failed to save.");
     }
   };
 
-  const handleEditClick = (student: any) => {
+  const handleEditClick = (student: Student) => {
     setEditingId(student.id);
     setFormData({
       name: student.name || '',
       fatherName: student.fatherName || '',
+      parentPhone: student.parentPhone || '',
       admissionNumber: student.admissionNumber || '',
       monthlyFee: (student.monthlyFee || 0).toString(),
       discount: (student.discount || 0).toString(),
       annualCharges: (student.annualCharges || 0).toString()
     });
+    setMonthlyCharges(toDrafts(student.monthlyCharges));
     setShowModal(true);
   };
 
-  const handleDeleteStudent = async (id: number) => {
+  const handleDeleteStudent = async (id: RecordId) => {
     if (!confirm("Are you sure you want to delete this student?")) return;
     const res = await fetch(`/api/students?id=${id}`, { method: 'DELETE' });
     if (res.ok) fetchStudents();
@@ -115,7 +123,7 @@ export default function ClassDetails() {
           <h1>{classInfo ? `${classInfo.name} ${classInfo.section ? ` - ${classInfo.section}` : ''}` : 'Loading...'}</h1>
           <p>Manage {students.length} students assigned to this class.</p>
         </div>
-        <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' }); setShowModal(true); }} className="btn btn-primary">+ Register Student</button>
+        <button onClick={() => { setEditingId(null); setFormData({ name: '', fatherName: '', parentPhone: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' }); setMonthlyCharges([]); setShowModal(true); }} className="btn btn-primary">+ Register Student</button>
       </div>
 
       <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
@@ -155,8 +163,13 @@ export default function ClassDetails() {
                     <div style={{ fontWeight: 600 }}>{s.name}</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>S/O: {s.fatherName || 'N/A'}</div>
                   </td>
-                  <td>Rs. {s.monthlyFee || 0}</td>
-                  <td>{s.discount > 0 ? <span className="badge badge-warning">- Rs. {s.discount}</span> : 'None'}</td>
+                  <td>
+                    Rs. {s.monthlyFee || 0}
+                    {chargesTotal(s.monthlyCharges) > 0 && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>+ {(s.monthlyCharges ?? []).map((c) => `${c.label} ${c.amount}`).join(', ')}</div>
+                    )}
+                  </td>
+                  <td>{(s.discount ?? 0) > 0 ? <span className="badge badge-warning">- Rs. {s.discount}</span> : 'None'}</td>
                   <td><span className="badge badge-success">{s.status}</span></td>
                   <td>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -181,7 +194,7 @@ export default function ClassDetails() {
 
       {showModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', padding: '2rem' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', padding: '2rem', maxHeight: '92vh', overflowY: 'auto' }}>
             <h2 style={{ marginBottom: '1.5rem' }}>{editingId ? 'Modify Student' : `Register to ${classInfo?.name}`}</h2>
             <form onSubmit={handleSaveStudent}>
               <div className="form-group">
@@ -189,8 +202,12 @@ export default function ClassDetails() {
                 <input required className="form-input" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
               </div>
               <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                <label className="form-label">Father's Name</label>
+                <label className="form-label">Father&apos;s Name</label>
                 <input required className="form-input" value={formData.fatherName} onChange={e => setFormData({ ...formData, fatherName: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Parent Phone (WhatsApp)</label>
+                <input className="form-input" placeholder="0300-1234567" type="tel" value={formData.parentPhone} onChange={e => setFormData({ ...formData, parentPhone: e.target.value })} />
               </div>
               <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                 <label className="form-label">Admission Number</label>
@@ -211,6 +228,14 @@ export default function ClassDetails() {
                 <label className="form-label">Annual Charges (Total for Year)</label>
                 <input type="number" className="form-input" placeholder="Admission, Registration, etc." value={formData.annualCharges} onChange={e => setFormData({ ...formData, annualCharges: e.target.value })} />
               </div>
+
+              {has('charges') && <div className="form-group">
+                <label className="form-label">Monthly Extra Charges (e.g. Transport)</label>
+                <ChargesEditor value={monthlyCharges} onChange={setMonthlyCharges} />
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  Billed every month on top of the fee. Changes also update this student&apos;s unpaid vouchers.
+                </p>
+              </div>}
 
               <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
                 <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setShowModal(false); setEditingId(null); }}>Cancel</button>

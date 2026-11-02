@@ -1,130 +1,108 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
 :: ============================================================
-::           SCHOOL ERP - PROFESSIONAL SMART INSTALLER
-:: ============================================================
-:: This script handles automatic elevation, dependency checks, 
-:: and unified installation for both School & Fee modules.
+::           SCHOOL ERP - INSTALLER
+:: Installs Node.js if needed, the app's libraries, builds the
+:: app and puts a shortcut on the Desktop.
 :: ============================================================
 
-TITLE School ERP - Smart Installer v2.0
+TITLE School ERP - Installer
 COLOR 0B
 
-:: 1. CRASH GUARD & ADMIN CHECK
-:init
-:: Force the script to run from its own folder (Fixes System32 error)
+:: Run from this script's own folder (double-clicking can start in System32)
 cd /d "%~dp0"
-echo [!] Initializing Installer...
 
-:: Check for Administrative privileges
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [!] Requesting Administrative Privileges...
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
-    exit /b
-)
-
-:: 2. EXTRACTION CHECK (Prevent running from inside ZIP)
+:: Running straight from inside a ZIP extracts to a temp folder that later disappears
 echo %CD% | findstr /i "AppData\Local\Temp" >nul
 if %errorlevel% == 0 (
     echo.
-    echo [X] ERROR: YOU MUST EXTRACT THE FILES FIRST!
-    echo [!] It looks like you are running the installer directly from the ZIP file.
-    echo [!] Please Right-Click the ZIP, select "Extract All", and run this again 
+    echo [X] ERROR: Please extract the ZIP first.
+    echo [!] Right-click the ZIP, choose "Extract All", then run this file
     echo     from the extracted folder.
     echo.
     pause
-    exit /b
+    exit /b 1
 )
 
-:: 3. MAIN INSTALLATION WRAPPER
-call :main_install
-if %errorlevel% neq 0 (
-    echo.
-    echo [X] INSTALLATION FAILED!
-    echo [!] Please check the errors above.
-) else (
-    echo.
-    echo ============================================================
-    echo              INSTALLATION SUCCESSFUL!
-    echo ============================================================
-    echo.
-    echo You can now use "RUN_ERP.bat" to start the system.
-)
-
-echo.
-echo Press any key to close this window...
-pause >nul
-exit /b
-
-:main_install
 echo ============================================================
-echo Starting Installation Process...
+echo Starting installation...
 echo ============================================================
 echo.
 
-:: A. Check for Node.js
-echo [1/4] Checking for Node.js engine...
+:: 1. Node.js
+echo [1/5] Checking for Node.js...
 node -v >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [!] Node.js is NOT installed. Downloading Official Installer...
-    curl -L "https://nodejs.org/dist/v20.12.2/node-v20.12.2-x64.msi" -o node_installer.msi
-    if %errorlevel% neq 0 (
-        echo [X] ERROR: Failed to download Node.js. Check your internet connection.
-        return 1
+    echo [!] Node.js is not installed. Downloading the official installer...
+    curl -L "https://nodejs.org/dist/v24.21.0/node-v24.21.0-x64.msi" -o node_installer.msi
+    if errorlevel 1 (
+        echo [X] ERROR: Could not download Node.js. Check your internet connection.
+        goto :failed
     )
-    echo [!] Starting Node.js installation...
+    echo [!] Installing Node.js ^(Windows will ask for permission^)...
     msiexec /i node_installer.msi /passive /norestart
-    echo [OK] Node.js Engine Installed. 
-    echo [!] NOTE: Re-launching script to refresh system paths...
     del node_installer.msi
-    start "" "%~f0"
-    exit /b
+    rem This window still has the old PATH, so Node.js only becomes visible in a new one.
+    echo [OK] Node.js installed. Close this window and run INSTALL_ERP.bat again.
+    goto :stop
 )
 echo [OK] Node.js is ready.
 
-:: B. Install Dependencies
+:: 2. Database settings
 echo.
-echo [2/4] Installing Required Libraries...
-call npm install
-if %errorlevel% neq 0 (
-    echo [X] ERROR: Failed to install system dependencies.
-    exit /b 1
+echo [2/5] Checking database settings...
+if not exist ".env.local" (
+    copy ".env.example" ".env.local" >nul
+    echo [!] A settings file has been created: .env.local
+    echo [!] Put your Supabase connection string in DATABASE_URL, save it,
+    echo     then run this installer again.
+    start "" notepad ".env.local"
+    goto :stop
 )
-echo [OK] Dependencies Ready.
+findstr /r /c:"^DATABASE_URL=postgres" ".env.local" >nul
+if errorlevel 1 (
+    echo [X] .env.local has no DATABASE_URL. Copy that line from .env.example, put your
+    echo     Supabase connection string in it and run this again.
+    start "" notepad ".env.local"
+    goto :stop
+)
+findstr /c:"YOUR-PROJECT-REF" ".env.local" >nul
+if %errorlevel% == 0 (
+    echo [X] .env.local still has the example DATABASE_URL. Put your real one in and run this again.
+    start "" notepad ".env.local"
+    goto :stop
+)
+echo [OK] Settings found.
 
-:: C. Build Production Bundle
+:: 3. Libraries
 echo.
-echo [3/5] Building System (Creating .next folder)...
+echo [3/5] Installing required libraries...
+call npm ci
+if errorlevel 1 (
+    echo [X] ERROR: Failed to install libraries.
+    goto :failed
+)
+echo [OK] Libraries ready.
+
+:: 4. Build
+echo.
+echo [4/5] Building the app...
 call npm run build
-if %errorlevel% neq 0 (
-    echo [X] ERROR: Failed to build the application.
-    exit /b 1
+if errorlevel 1 (
+    echo [X] ERROR: Failed to build the app.
+    goto :failed
 )
-echo [OK] Production Bundle Created.
+echo [OK] App built.
 
-:: D. Initialize Data & Assets
+:: 5. Shortcut
 echo.
-echo [4/5] Finalizing System Data...
-if not exist "data" mkdir data
-echo [OK] Data folders initialized.
-
-:: E. Setup Assets & Shortcut
-echo.
-echo [5/6] Finalizing Professional Assets...
-powershell -ExecutionPolicy Bypass -File "ConvertIcon.ps1"
-if %errorlevel% neq 0 (
-    echo [!] Warning: Could not prepare professional icon.
-)
-
-echo.
-echo [6/6] Creating Desktop Shortcut...
+echo [5/5] Creating Desktop shortcut...
 powershell -ExecutionPolicy Bypass -File "CreateShortcut.ps1"
-if %errorlevel% neq 0 (
-    echo [!] Warning: Could not create desktop shortcut automatically.
+if errorlevel 1 (
+    echo [!] Warning: Could not create the Desktop shortcut. Use RUN_ERP.bat instead.
 ) else (
-    echo [OK] Shortcut created on Desktop.
+    echo [OK] Shortcut created on the Desktop.
 )
 
 echo.
@@ -132,10 +110,16 @@ echo ============================================================
 echo              INSTALLATION SUCCESSFUL!
 echo ============================================================
 echo.
-echo [!] You can now close this window and use the "Fee Management"
-echo     icon on your Desktop to start the system.
+echo Start the system from the "Fee Management System" icon on your Desktop.
+echo First login: admin / brookfield  (change it right away from the Dashboard)
 echo.
-echo ------------------------------------------------------------
-echo Press any key to finish...
-pause >nul
-exit /b
+pause
+exit /b 0
+
+:failed
+echo.
+echo [X] INSTALLATION FAILED. Please check the errors above.
+:stop
+echo.
+pause
+exit /b 1

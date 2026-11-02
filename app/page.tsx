@@ -1,108 +1,123 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { reloadTo } from '@/lib/reloadTo';
+import { isLeft } from '@/lib/fees';
+import type { Expense, FeeVoucher, SalaryRecord, Student } from '@/lib/types';
+
+interface DashboardData {
+  fees: FeeVoucher[];
+  students: Student[];
+  expenses: Expense[];
+  salaries: SalaryRecord[];
+}
+
+/** Amounts may arrive as numbers or numeric strings; anything else counts as 0. */
+const num = (value: unknown) => parseFloat(String(value)) || 0;
+
+async function fetchDashboardData(): Promise<DashboardData> {
+  const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+  const currentYear = new Date().getFullYear().toString();
+
+  // Opening the dashboard bills the current month for any student not billed yet.
+  await fetch('/api/fees', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ month: currentMonth, year: currentYear })
+  }).catch(err => console.error("Silent generate failed", err));
+
+  const [feesRes, studentsRes, expRes, salRes] = await Promise.all([
+    fetch('/api/fees', { cache: 'no-store' }),
+    fetch('/api/students?limit=5000', { cache: 'no-store' }),
+    fetch('/api/expenses', { cache: 'no-store' }),
+    fetch('/api/salaries', { cache: 'no-store' })
+  ]);
+
+  const fees = feesRes.ok ? await feesRes.json() : [];
+  const sr = studentsRes.ok ? await studentsRes.json() : {total:0, students:[]};
+  const exps = expRes.ok ? await expRes.json() : [];
+  const sals = salRes.ok ? await salRes.json() : [];
+
+  return { fees, students: sr.students || [], expenses: exps, salaries: sals };
+}
 
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState<'monthly' | 'all-time'>('monthly');
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<{fees: any[], students: any[], expenses: any[], salaries: any[]}>({ 
-    fees: [], 
-    students: [], 
-    expenses: [], 
-    salaries: [] 
+  const [data, setData] = useState<DashboardData>({
+    fees: [],
+    students: [],
+    expenses: [],
+    salaries: []
   });
 
-  const loadDashboard = async () => {
-    setLoading(true);
-    try {
-      const currentMonth = new Date().toLocaleString('default', { month: 'long' });
-      const currentYear = new Date().getFullYear().toString();
-      
-      await fetch('/api/fees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: currentMonth, year: currentYear })
-      }).catch(err => console.error("Silent generate failed", err));
-
-      const [feesRes, studentsRes, expRes, salRes] = await Promise.all([
-        fetch('/api/fees', { cache: 'no-store' }),
-        fetch('/api/students?limit=5000', { cache: 'no-store' }),
-
-        fetch('/api/expenses', { cache: 'no-store' }),
-        fetch('/api/salaries', { cache: 'no-store' }) 
-      ]);
-      
-      const fees = feesRes.ok ? await feesRes.json() : [];
-      const sr = studentsRes.ok ? await studentsRes.json() : {total:0, students:[]};
-      const exps = expRes.ok ? await expRes.json() : [];
-      const sals = salRes.ok ? await salRes.json() : [];
-      
-      setData({ fees, students: sr.students || [], expenses: exps, salaries: sals });
-    } catch (err) {
-      console.error("Dashboard error", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadDashboard = useCallback(
+    () =>
+      fetchDashboardData()
+        .then(setData)
+        .catch((err) => console.error("Dashboard error", err))
+        .finally(() => setLoading(false)),
+    []
+  );
 
   useEffect(() => {
     loadDashboard();
-  }, []);
+  }, [loadDashboard]);
 
   const calculateMetrics = () => {
     const now = new Date();
     const { fees, students, expenses, salaries } = data;
-    
-    const isPaidInTargetRange = (dateStr: string) => {
+
+    const isPaidInTargetRange = (dateStr?: string | null) => {
         if (!dateStr) return false;
         if (viewMode === 'all-time') return true;
         const d = new Date(dateStr);
         return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     };
 
-    const allTimeAC = students.reduce((a, s: any) => a + (parseFloat(s.paidAnnualCharges) || 0), 0);
-    
-    const targetFees = fees.filter((f: any) => (f.status === 'Paid' || f.status === 'Partially Paid') && isPaidInTargetRange(f.paymentDate));
+    const allTimeAC = students.reduce((a, s) => a + num(s.paidAnnualCharges), 0);
+
+    const targetFees = fees.filter((f) => (f.status === 'Paid' || f.status === 'Partially Paid') && isPaidInTargetRange(f.paymentDate));
     // User wants ONLY Tuition from the filtered fees (Monthly or All-time)
-    const tuitionIn = targetFees.reduce((a, c: any) => a + (c.isACOnly ? 0 : (parseFloat(c.paidTuition) || parseFloat(c.amount) || 0)), 0);
-    
+    const tuitionIn = targetFees.reduce((a, c) => a + (c.isACOnly ? 0 : (num(c.paidTuition) || num(c.amount))), 0);
+
     // Monthly Gross = All Time AC + Selected Tuition (User's specific formula)
     const gross = allTimeAC + tuitionIn;
 
     // Expenses (Filter out manual 'Salary' entries to prevent double counting with formal salaries)
-    const targetExps = expenses.filter((e: any) => isPaidInTargetRange(e.date) && e.category?.toLowerCase() !== 'salary')
-                               .reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0);
-    const targetSals = salaries.filter((s: any) => isPaidInTargetRange(s.paymentDate)).reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0);
+    const targetExps = expenses.filter((e) => isPaidInTargetRange(e.date) && e.category?.toLowerCase() !== 'salary')
+                               .reduce((a, c) => a + num(c.amount), 0);
+    const targetSals = salaries.filter((s) => isPaidInTargetRange(s.paymentDate)).reduce((a, c) => a + num(c.amount), 0);
 
-    const currentMonthBilled = fees.filter((f: any) => f.month === now.toLocaleString('default', { month: 'long' }) && f.year === now.getFullYear().toString())
-                                   .reduce((a: number, c: any) => a + (parseFloat(c.amount) || 0), 0);
-    const totalBilled = fees.reduce((a, c: any) => a + (parseFloat(c.amount) || 0), 0) + students.reduce((a, s: any) => a + (parseFloat(s.annualCharges) || 0), 0);
+    const currentMonthBilled = fees.filter((f) => f.month === now.toLocaleString('default', { month: 'long' }) && f.year === now.getFullYear().toString())
+                                   .reduce((a, c) => a + num(c.amount), 0);
+    const totalBilled = fees.reduce((a, c) => a + num(c.amount), 0) + students.reduce((a, s) => a + num(s.annualCharges), 0);
 
     const expected = (viewMode === 'all-time') ? totalBilled : currentMonthBilled;
 
     return {
-      students: students.length,
+      students: students.filter((s) => !isLeft(s)).length,
       gross,
       acIn: allTimeAC,
       tuitionIn,
       expenses: targetExps + targetSals,
       expected,
-      pending: (fees.reduce((a, c) => a + ((parseFloat(c.amount) || 0) - (parseFloat(c.paidTuition) || 0)), 0)) + 
-               (students.reduce((a, s) => a + ((parseFloat(s.annualCharges) || 0) - (parseFloat(s.paidAnnualCharges) || 0)), 0))
+      pending: (fees.reduce((a, c) => a + (num(c.amount) - num(c.paidTuition)), 0)) +
+               (students.reduce((a, s) => a + (num(s.annualCharges) - num(s.paidAnnualCharges)), 0))
     };
   };
 
   const metrics = calculateMetrics();
-  
+
   const unifiedLogs = [
-    ...data.fees.filter((f: any) => f.status === 'Paid' || f.status === 'Partially Paid').map((f: any) => ({
+    ...data.fees.filter((f) => f.status === 'Paid' || f.status === 'Partially Paid').map((f) => ({
       id: `fee-${f.id}`,
       type: 'INCOME',
       category: f.month === 'Annual Charges' ? 'Annual Charges' : 'Fee',
       title: f.studentName || 'Student Payment',
       amount: f.totalReceived || f.amount,
-      date: f.paymentDate || f.date || new Date().toISOString(),
+      date: f.paymentDate || new Date().toISOString(),
     })),
-    ...data.expenses.map((e: any) => ({
+    ...data.expenses.map((e) => ({
       id: `exp-${e.id}`,
       type: 'EXPENSE',
       category: e.category || 'General',
@@ -110,7 +125,7 @@ export default function Dashboard() {
       amount: e.amount,
       date: e.date || new Date().toISOString(),
     })),
-    ...data.salaries.map((s: any) => ({
+    ...data.salaries.map((s) => ({
       id: `sal-${s.id}`,
       type: 'EXPENSE',
       category: 'Salary',
@@ -240,7 +255,7 @@ export default function Dashboard() {
                               const rawId = log.id.replace('fee-', '');
                               const res = await fetch(`/api/fees?id=${rawId}`, { method: 'DELETE' });
                               if(res.ok) loadDashboard();
-                              else alert("Failed to reverse.");
+                              else alert((await res.json().catch(() => null))?.error || "Failed to reverse.");
                             }
                           }}
                         >
@@ -285,7 +300,7 @@ export default function Dashboard() {
                       a.click();
                       window.URL.revokeObjectURL(url);
                       alert("Backup Downloaded Successfully!");
-                    } catch (e) {
+                    } catch {
                       alert("Backup failed. Check system connection.");
                     }
                   }}
@@ -329,7 +344,7 @@ export default function Dashboard() {
                             const err = await res.json();
                             alert("ERROR: " + err.error);
                           }
-                        } catch (err) {
+                        } catch {
                           alert("Invalid backup file.");
                         }
                       };
@@ -351,7 +366,7 @@ export default function Dashboard() {
                  onClick={() => {
                    const oldPass = prompt("Enter Current Password:");
                    if (!oldPass) return;
-                   const newPass = prompt("Enter New Password:");
+                   const newPass = prompt("Enter New Password (min 8 chars):");
                    if (!newPass) return;
                    const confirmPass = prompt("Confirm New Password:");
                    if (newPass !== confirmPass) {
@@ -366,7 +381,8 @@ export default function Dashboard() {
                    }).then(async res => {
                      if (res.ok) {
                        alert("Password changed successfully! Please login again.");
-                       window.location.href = '/login';
+                       await fetch('/api/auth/logout', { method: 'POST' });
+                       reloadTo('/login');
                      } else {
                        const err = await res.json();
                        alert("Error: " + err.error);

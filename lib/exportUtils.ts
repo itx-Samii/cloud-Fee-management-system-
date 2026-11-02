@@ -1,7 +1,7 @@
 /**
  * Client-side utility for exporting JSON data to CSV
  */
-export function exportToCSV(data: any[], filename: string, headers: {[key: string]: string}) {
+export function exportToCSV<T extends object>(data: T[], filename: string, headers: {[key: string]: string}) {
   if (!data || !data.length) {
     alert("No data available to export");
     return;
@@ -14,8 +14,9 @@ export function exportToCSV(data: any[], filename: string, headers: {[key: strin
 
   // 2. Add data rows
   data.forEach(item => {
+    const fields = item as Record<string, unknown>;
     const row = headerKeys.map(key => {
-      const val = item[key] !== undefined ? item[key] : "";
+      const val = fields[key] !== undefined ? fields[key] : "";
       // Escape commas and wrap in quotes for safety
       const stringified = String(val).replace(/"/g, '""');
       return `"${stringified}"`;

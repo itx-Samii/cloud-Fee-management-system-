@@ -343,6 +343,13 @@ p { color: var(--text-muted); line-height: 1.6; font-size: 0.95rem; }
 
   .no-print, .sidebar { display: none !important; }
 
+  /* Pop-up documents (salary slip) print on plain paper, without the dimmed backdrop. */
+  .slip-overlay {
+    position: static !important;
+    background: none !important;
+    padding: 0 !important;
+  }
+
   .main-content {
     margin-left: 0 !important;
     width: 100% !important;

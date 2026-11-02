@@ -1,107 +1,107 @@
 import { NextResponse } from 'next/server';
-import { readData, writeData, generateId, getTenantId } from '@/lib/dbHandler';
-
-const FILE_NAME = 'staff.json';
+import { ADMIN, requireFeature, requireSession } from '@/lib/auth';
+import { audit, describeChanges, rupees } from '@/lib/audit';
+import { deleteRecord, findAll, findById, insertRecord, updateRecord } from '@/lib/dbHandler';
+import { jsonError, optionalNumber, readBody, toNumber, toText, withoutUndefined } from '@/lib/http';
+import type { StaffMember } from '@/lib/types';
 
 export async function GET() {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+
   try {
-    const staff = await readData<any>(FILE_NAME, schoolId);
-    return NextResponse.json(staff);
+    return NextResponse.json(await findAll<StaffMember>('staff', session.schoolId));
   } catch (err) {
-    return NextResponse.json({ error: 'Failed to fetch staff' }, { status: 500 });
+    console.error(`GET staff failed for ${session.schoolId}:`, err);
+    return jsonError('Failed to fetch staff', 500);
   }
 }
 
 export async function POST(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'salaries');
+  if (locked) return locked;
+
+  const body = await readBody(request);
+  const name = toText(body?.name);
+  if (!body || !name) return jsonError('Staff name is required', 400);
+
   try {
-    const data = await request.json();
-    const staff = await readData<any>(FILE_NAME, schoolId);
-    const nextId = await generateId(FILE_NAME, schoolId);
-
-    const newStaff = {
-      id: nextId,
-      schoolId,
-      name: data.name,
-      designation: data.designation,
-      salary: parseFloat(data.salary || '0'),
-      deductionPerOff: parseFloat(data.deductionPerOff || '0'),
-      joinedDate: data.joinedDate || new Date().toISOString(),
-      status: 'Active'
-    };
-
-    staff.push(newStaff);
-    await writeData(FILE_NAME, staff, schoolId);
-    return NextResponse.json(newStaff);
+    const member = await insertRecord('staff', session.schoolId, {
+      name,
+      designation: toText(body.designation) ?? '',
+      salary: toNumber(body.salary),
+      deductionPerOff: toNumber(body.deductionPerOff),
+      joinedDate: toText(body.joinedDate) || new Date().toISOString(),
+      status: 'Active',
+    });
+    await audit(session, 'staff.add', `Added staff member ${name}, salary ${rupees(member.salary)}`);
+    return NextResponse.json(member);
   } catch (err) {
-    return NextResponse.json({ error: 'Failed to add staff' }, { status: 500 });
+    console.error(`POST staff failed for ${session.schoolId}:`, err);
+    return jsonError('Failed to add staff', 500);
   }
 }
 
 export async function PUT(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'salaries');
+  if (locked) return locked;
+
+  const body = await readBody(request);
+  const id = toText(body?.id);
+  if (!body || !id) return jsonError('ID is required', 400);
+
+  const changes = withoutUndefined({
+    name: toText(body.name) || undefined,
+    designation: toText(body.designation),
+    salary: optionalNumber(body.salary),
+    deductionPerOff: optionalNumber(body.deductionPerOff),
+    joinedDate: toText(body.joinedDate) || undefined,
+    status: toText(body.status) || undefined,
+  });
+
   try {
-    const data = await request.json();
-    const staff = await readData<any>(FILE_NAME, schoolId);
-    const index = staff.findIndex((s: any) => s.id?.toString() === data.id?.toString());
+    const before = await findById<StaffMember>('staff', session.schoolId, id);
+    const member = before && (await updateRecord<StaffMember>('staff', session.schoolId, before.id, changes));
+    if (!before || !member) return jsonError('Staff not found', 404);
 
-    if (index === -1) return NextResponse.json({ error: 'Staff not found' }, { status: 404 });
-
-    const updatedStaff = {
-      ...staff[index],
-      ...data,
-      salary: data.salary !== undefined ? parseFloat(data.salary) : staff[index].salary,
-      deductionPerOff: data.deductionPerOff !== undefined ? parseFloat(data.deductionPerOff) : staff[index].deductionPerOff
-    };
-    staff[index] = updatedStaff;
-    await writeData(FILE_NAME, staff, schoolId);
-    return NextResponse.json(updatedStaff);
+    const changed = describeChanges(before, changes, {
+      name: 'name',
+      designation: 'designation',
+      salary: 'salary',
+      deductionPerOff: 'deduction per off',
+      status: 'status',
+    });
+    if (changed) await audit(session, 'staff.edit', `Edited ${before.name}: ${changed}`);
+    return NextResponse.json(member);
   } catch (err) {
-    return NextResponse.json({ error: 'Failed to update staff' }, { status: 500 });
+    console.error(`PUT staff failed for ${session.schoolId}:`, err);
+    return jsonError('Failed to update staff', 500);
   }
 }
 
 export async function DELETE(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'salaries');
+  if (locked) return locked;
+  const { schoolId } = session;
+
+  const id = new URL(request.url).searchParams.get('id');
+  if (!id) return jsonError('ID is required', 400);
+
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+    const member = await findById<StaffMember>('staff', schoolId, id);
+    if (!member || !(await deleteRecord('staff', schoolId, member.id))) return jsonError('Staff not found', 404);
 
-    const staff = await readData<any>(FILE_NAME, schoolId);
-    const filtered = staff.filter((s: any) => s.id.toString() !== id.toString());
-    
-    if (staff.length === filtered.length) {
-      return NextResponse.json({ error: 'Staff not found' }, { status: 404 });
-    }
-
-    await writeData(FILE_NAME, filtered, schoolId);
-
-    try {
-      const history = await readData<any>('salaries_history.json', schoolId);
-      const filteredHistory = history.filter((h: any) => h.staffId.toString() !== id.toString());
-      if (history.length !== filteredHistory.length) {
-        await writeData('salaries_history.json', filteredHistory, schoolId);
-      }
-
-      const expenses = await readData<any>('expenses.json', schoolId);
-      const filteredExpenses = expenses.filter((e: any) => {
-        if (e.category === 'Salary') {
-          const targetStaff = staff.find((s: any) => s.id.toString() === id.toString());
-          if (targetStaff && e.description?.includes(targetStaff.name)) return false;
-        }
-        return true;
-      });
-      if (expenses.length !== filteredExpenses.length) {
-        await writeData('expenses.json', filteredExpenses, schoolId);
-      }
-    } catch (e) {
-      console.error("Staff cleanup failed", e);
-    }
-
+    // Salaries already paid stay in the books (each record keeps the name), so past expenses don't change.
+    await audit(session, 'staff.delete', `Removed staff member ${member.name}`);
     return NextResponse.json({ success: true });
   } catch (err) {
-    return NextResponse.json({ error: 'Failed to delete staff' }, { status: 500 });
+    console.error(`DELETE staff failed for ${schoolId}:`, err);
+    return jsonError('Failed to delete staff', 500);
   }
 }

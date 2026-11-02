@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { reloadTo } from '@/lib/reloadTo';
+import { DEFAULT_FEATURES, featureOn, type FeatureKey } from '@/lib/features';
 
 interface UserInfo {
   username: string;
@@ -13,45 +15,42 @@ interface UserInfo {
 export default function SidebarNav() {
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo>({ username: 'admin', role: 'admin', displayName: 'Administrator', schoolId: 'school_brookfield' });
-  const [features, setFeatures] = useState({
-    collection: true,
-    generate: true,
-    tracking: true,
-    reports: true,
-    expenses: true,
-    ledger: true,
-    salaries: true,
-    classes: true,
-    students: true,
-    users: true
-  });
+  const [features, setFeatures] = useState<Record<string, boolean>>(DEFAULT_FEATURES);
 
   useEffect(() => {
     async function checkAuth() {
+      // Nobody is signed in on the login page yet; it reloads the app after signing in.
+      if (window.location.pathname === '/login') return;
       try {
         const res = await fetch('/api/auth/login');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user) setUser(data.user);
-        }
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.user) setUser(data.user);
         const licRes = await fetch('/api/admin/license');
         if (licRes.ok) {
           const licData = await licRes.json();
           if (licData.features) setFeatures(licData.features);
         }
-      } catch (e) {
-        // ignore
+      } catch {
+        // offline: keep showing the defaults
       }
     }
     checkAuth();
   }, []);
 
-  const allLinks = [
+  const logout = async () => {
+    const res = await fetch('/api/auth/logout', { method: 'POST' });
+    if (res.ok) reloadTo('/login');
+  };
+
+  const allLinks: { href: string; label: string; roles: string[]; icon: string; featureKey?: FeatureKey }[] = [
     { href: '/superadmin', label: 'Client Licenses (SaaS)', roles: ['superadmin'], icon: '🌍' },
     { href: '/', label: 'Dashboard', roles: ['admin'], icon: '📊' },
     { href: '/collection', label: 'Receive Payment', roles: ['admin', 'accountant'], icon: '💰', featureKey: 'collection' },
+    { href: '/cashbook', label: 'Daily Cash Book', roles: ['admin', 'accountant'], icon: '📒', featureKey: 'cashbook' },
     { href: '/generate', label: 'Generate Vouchers', roles: ['admin', 'accountant'], icon: '⚡', featureKey: 'generate' },
     { href: '/tracking', label: 'Class-wise Tracking', roles: ['admin', 'accountant'], icon: '📈', featureKey: 'tracking' },
+    { href: '/defaulters', label: 'Defaulter List', roles: ['admin', 'accountant'], icon: '⏰', featureKey: 'defaulters' },
     { href: '/reports', label: 'Financial Reports', roles: ['admin'], icon: '📑', featureKey: 'reports' },
     { href: '/expenses', label: 'Expense Manager', roles: ['admin', 'accountant'], icon: '🧾', featureKey: 'expenses' },
     { href: '/ac-ledger', label: 'AC Ledger', roles: ['admin'], icon: '🏛️', featureKey: 'ledger' },
@@ -59,6 +58,7 @@ export default function SidebarNav() {
     { href: '/classes', label: 'Classes Management', roles: ['admin'], icon: '🏫', featureKey: 'classes' },
     { href: '/students', label: 'All Students', roles: ['admin'], icon: '🎓', featureKey: 'students' },
     { href: '/users', label: 'Users & Roles', roles: ['admin'], icon: '🛡️', featureKey: 'users' },
+    { href: '/activity', label: 'Activity Log', roles: ['admin'], icon: '🕵️', featureKey: 'activity' },
   ];
 
   const filteredLinks = allLinks.filter(link => link.roles.includes(user.role));
@@ -117,9 +117,9 @@ export default function SidebarNav() {
           <nav className="sidebar-nav-menu">
             {filteredLinks.map((link) => {
               const isActive = pathname === link.href;
-              const isLocked = link.featureKey ? !(features as any)[link.featureKey] : false;
+              const isLocked = link.featureKey ? !featureOn(features, link.featureKey) : false;
               return (
-                <Link 
+                <Link
                   key={link.href}
                   href={isLocked ? '#' : link.href} 
                   onClick={(e) => {
@@ -152,11 +152,8 @@ export default function SidebarNav() {
         </div>
 
         <div className="sidebar-logout-box">
-          <button 
-            onClick={async () => {
-              const res = await fetch('/api/auth/logout', { method: 'POST' });
-              if (res.ok) window.location.href = '/login';
-            }}
+          <button
+            onClick={logout}
             style={{
               width: '100%',
               padding: '0.85rem',
@@ -217,7 +214,7 @@ export default function SidebarNav() {
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
             {filteredLinks.map(link => {
               const isActive = pathname === link.href;
-              const isLocked = link.featureKey ? !(features as any)[link.featureKey] : false;
+              const isLocked = link.featureKey ? !featureOn(features, link.featureKey) : false;
               return (
                 <Link
                   key={link.href}
@@ -258,10 +255,7 @@ export default function SidebarNav() {
           {/* Logout Button */}
           <div style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
             <button
-              onClick={async () => {
-                const res = await fetch('/api/auth/logout', { method: 'POST' });
-                if (res.ok) window.location.href = '/login';
-              }}
+              onClick={logout}
               style={{ width: '100%', padding: '1rem', background: '#ef4444', color: 'white', fontWeight: 700, borderRadius: '16px', border: 'none', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', boxShadow: '0 8px 20px rgba(239, 68, 68, 0.4)', cursor: 'pointer' }}
             >
               <span>🔒</span> Secure Logout

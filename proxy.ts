@@ -1,88 +1,41 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { decodeSession, SESSION_COOKIE } from './lib/session';
+
+// Page-level redirects only. API routes check the session themselves (lib/auth.ts) and
+// answer with JSON errors, so they are excluded by the matcher below.
+
+const PUBLIC_PAGES = ['/login', '/license-blocked'];
+const ADMIN_ONLY_PAGES = ['/reports', '/students', '/classes', '/salaries', '/ac-ledger', '/users', '/activity'];
+
+function isUnder(pathname: string, prefixes: string[]) {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 export function proxy(request: NextRequest) {
-  const session = request.cookies.get('school-session');
   const { pathname } = request.nextUrl;
+  if (PUBLIC_PAGES.includes(pathname)) return NextResponse.next();
 
-  // 1. Allow login page, license blocked page, and auth APIs
-  if (pathname === '/login' || pathname === '/license-blocked' || pathname.startsWith('/api/auth')) {
-    return NextResponse.next();
+  const user = decodeSession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!user) {
+    const response = NextResponse.redirect(new URL('/login', request.url));
+    if (request.cookies.has(SESSION_COOKIE)) response.cookies.delete(SESSION_COOKIE);
+    return response;
   }
 
-  // 2. Allow static files (public assets, _next/static, etc)
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.includes('.') ||
-    pathname.startsWith('/favicon.ico')
-  ) {
-    return NextResponse.next();
-  }
-
-  // 3. If no session, redirect to login
-  if (!session?.value) {
-    const loginUrl = new URL('/login', request.url);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // 4. Role-based Route Protection
-  let user: { username: string; role: string; displayName: string } = {
-    username: 'admin',
-    role: 'admin',
-    displayName: 'Administrator'
-  };
-
-  if (session.value !== 'authenticated') {
-    try {
-      user = JSON.parse(session.value);
-    } catch (e) {
-      // fallback to admin if unparseable
-    }
+  if (user.role !== 'superadmin' && isUnder(pathname, ['/superadmin'])) {
+    return NextResponse.redirect(new URL('/unauthorized', request.url));
   }
 
   if (user.role === 'accountant') {
-    // If Accountant navigates to root Dashboard, redirect directly to Receive Payment page
-    if (pathname === '/') {
-      return NextResponse.redirect(new URL('/collection', request.url));
-    }
-
-    // BLOCKED routes for Accountant
-    const blockedPrefixes = [
-      '/superadmin',
-      '/reports',
-      '/students',
-      '/classes',
-      '/salaries',
-      '/ac-ledger',
-      '/users',
-      '/api/superadmin',
-      '/api/admin/backup',
-      '/api/admin/restore',
-      '/api/users',
-      '/api/salaries',
-      '/api/staff'
-    ];
-
-    const isBlocked = blockedPrefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
-
-    if (isBlocked) {
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json({ error: 'Access Denied: Your role (Accountant) does not have permission to perform this action.' }, { status: 403 });
-      }
-      return NextResponse.redirect(new URL('/unauthorized', request.url));
-    }
-  }
-
-  // School Admin should not access SaaS Super Admin portal
-  if (user.role === 'admin' && (pathname === '/superadmin' || pathname.startsWith('/superadmin/') || pathname.startsWith('/api/superadmin'))) {
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Access Denied: Super Admin access required.' }, { status: 403 });
-    }
-    return NextResponse.redirect(new URL('/unauthorized', request.url));
+    // The dashboard is for principals; accountants start at Receive Payment.
+    if (pathname === '/') return NextResponse.redirect(new URL('/collection', request.url));
+    if (isUnder(pathname, ADMIN_ONLY_PAGES)) return NextResponse.redirect(new URL('/unauthorized', request.url));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: '/:path*',
+  // Everything except API routes, Next.js internals and static files (anything with a file extension).
+  matcher: ['/((?!api/|_next/static|_next/image|.*\\..*).*)'],
 };

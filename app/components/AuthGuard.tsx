@@ -25,7 +25,7 @@ export default function AuthGuard() {
     };
 
     checkAuth();
-  }, [pathname]);
+  }, [pathname, router]);
 
   return null;
 }

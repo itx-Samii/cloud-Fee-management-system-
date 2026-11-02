@@ -1,45 +1,49 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './generate.css';
+import { clearStoredSetting, useStoredSetting } from '@/lib/useStoredSetting';
+import { useFeeSettings } from '@/lib/useFeeSettings';
+import { useFeatures } from '@/lib/useFeatures';
+import ChallanBill from '../components/ChallanBill';
+import FeeSettingsFields from '../components/FeeSettingsFields';
+import { COMMON_CHARGES, VoucherCharges } from '../components/ChargesEditor';
+import type { FeeVoucher, RecordId, SchoolClass } from '@/lib/types';
+import { yearOptions } from '@/lib/fees';
 
-function numberToWords(num: number): string {
-  const ones = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
-  const tens = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
-  const convert = (n: number): string => {
-    if (n < 20) return ones[n];
-    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + ones[n % 10] : '');
-    if (n < 1000) return ones[Math.floor(n / 100)] + ' HUNDRED' + (n % 100 !== 0 ? ' AND ' + convert(n % 100) : '');
-    if (n < 100000) return convert(Math.floor(n / 1000)) + ' THOUSAND' + (n % 1000 !== 0 ? ' ' + convert(n % 1000) : '');
-    if (n < 10000000) return convert(Math.floor(n / 100000)) + ' LAKH' + (n % 100000 !== 0 ? ' ' + convert(n % 100000) : '');
-    return n.toString();
-  };
-  if (num === 0) return 'ZERO';
-  return convert(Math.floor(num)) + ' ONLY';
+async function fetchFeesFor(month: string, year: string): Promise<FeeVoucher[]> {
+  const res = await fetch(`/api/fees?month=${month}&year=${year}`, { cache: 'no-store' });
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
+async function fetchClassList(): Promise<SchoolClass[]> {
+  const res = await fetch('/api/classes');
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
 
 export default function GenerateFees() {
-  const [fees, setFees] = useState<any[]>([]);
+  const [fees, setFees] = useState<FeeVoucher[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mounted, setMounted] = useState(false);
-  const [schoolName, setSchoolName] = useState('YOUR SCHOOL NAME');
-  const [schoolAddress, setSchoolAddress] = useState('Rawalpindi, Pakistan');
-  const [logo, setLogo] = useState('');
-  const [printTargetId, setPrintTargetId] = useState<number | null>(null);
+  const [schoolName, setSchoolName] = useStoredSetting('fms-school-name', 'YOUR SCHOOL NAME');
+  const [schoolAddress, setSchoolAddress] = useStoredSetting('fms-school-address', 'Rawalpindi, Pakistan');
+  const [logo, setLogo] = useStoredSetting('fms-school-logo', '');
+  const [printTargetId, setPrintTargetId] = useState<RecordId | null>(null);
 
-  // Professional Branding States
-  const [bankName, setBankName] = useState('Meezan Bank Limited');
-  const [bankBranch, setBankBranch] = useState('Bank Road Sadar, Rawalpindi');
-  const [bankAccountTitle, setBankAccountTitle] = useState('YOUR SCHOOL SYSTEM');
-  const [bankAccountNo, setBankAccountNo] = useState('0000-000000-0000');
-  const [instituteId, setInstituteId] = useState('2109');
-  const [paymentMethods, setPaymentMethods] = useState('1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
-  const [challanNote, setChallanNote] = useState('Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
-  const [validUntilDays, setValidUntilDays] = useState(10);
-  const [lateFine, setLateFine] = useState(500);
+  // Professional Branding States (saved in this browser)
+  const [bankName, setBankName] = useStoredSetting('fms-bank-name', 'Meezan Bank Limited');
+  const [bankBranch, setBankBranch] = useStoredSetting('fms-bank-branch', 'Bank Road Sadar, Rawalpindi');
+  const [bankAccountTitle, setBankAccountTitle] = useStoredSetting('fms-bank-title', 'YOUR SCHOOL SYSTEM');
+  const [bankAccountNo, setBankAccountNo] = useStoredSetting('fms-bank-no', '0000-000000-0000');
+  const [instituteId, setInstituteId] = useStoredSetting('fms-inst-id', '2109');
+  const [paymentMethods, setPaymentMethods] = useStoredSetting('fms-pay-methods', '1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
+  const [challanNote, setChallanNote] = useStoredSetting('fms-note', 'Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
+  // Due days and late fine are school-wide (the server charges the fine), not per browser.
+  const { settings: feeSettings, save: saveFeeSettings, canEdit: canEditFees } = useFeeSettings();
   const [showConfig, setShowConfig] = useState(false);
+  const { has } = useFeatures();
 
-  const handlePrintIndividual = (id: number) => {
+  const handlePrintIndividual = (id: RecordId) => {
     setPrintTargetId(id);
     setTimeout(() => {
       window.print();
@@ -49,73 +53,31 @@ export default function GenerateFees() {
   const currentMonth = new Date().toLocaleString('default', { month: 'long' });
   const currentYear = new Date().getFullYear().toString();
 
-  const fetchMonthFees = async (m = currentMonth, y = currentYear) => {
-    const res = await fetch(`/api/fees?month=${m}&year=${y}`, { cache: 'no-store' });
-    const data = await res.json();
-    setFees(Array.isArray(data) ? data : []);
-  };
+  const fetchMonthFees = useCallback(
+    (m: string = currentMonth, y: string = currentYear) =>
+      fetchFeesFor(m, y).then(setFees).catch((err) => console.error("Failed to fetch vouchers", err)),
+    [currentMonth, currentYear]
+  );
 
-  const [classes, setClasses] = useState<any[]>([]);
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch('/api/classes');
-      const data = await res.json();
-      setClasses(data || []);
-    } catch {
-      console.error("Failed to fetch classes");
-    }
-  };
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
 
   const [genMonth, setGenMonth] = useState(currentMonth);
   const [genYear, setGenYear] = useState(currentYear);
-  const [genClassId, setGenClassId] = useState('all');
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const handleBulkGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsGenerating(true);
-    try {
-      const res = await fetch('/api/fees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: genMonth, year: genYear, classId: genClassId })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`Successfully generated ${data.count} new vouchers for ${genMonth} ${genYear}`);
-        fetchMonthFees(genMonth, genYear);
-      } else {
-        alert(data.error || "Generation failed");
-      }
-    } finally {
-      setIsGenerating(false);
-    }
-  };
+  // Charges on top of the fee: one voucher's (modal), or one charge for every voucher shown.
+  const [chargesFor, setChargesFor] = useState<FeeVoucher | null>(null);
+  const [showBulkCharge, setShowBulkCharge] = useState(false);
+  const [bulkLabel, setBulkLabel] = useState('');
+  const [bulkAmount, setBulkAmount] = useState('');
+  const [addingCharge, setAddingCharge] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setSchoolName(localStorage.getItem('fms-school-name') || 'YOUR SCHOOL NAME');
-    setSchoolAddress(localStorage.getItem('fms-school-address') || 'Rawalpindi, Pakistan');
-    setLogo(localStorage.getItem('fms-school-logo') || '');
-
-    setBankName(localStorage.getItem('fms-bank-name') || 'Meezan Bank Limited');
-    setBankBranch(localStorage.getItem('fms-bank-branch') || 'Bank Road Sadar, Rawalpindi');
-    setBankAccountTitle(localStorage.getItem('fms-bank-title') || 'YOUR SCHOOL SYSTEM');
-    setBankAccountNo(localStorage.getItem('fms-bank-no') || '0000-000000-0000');
-    setInstituteId(localStorage.getItem('fms-inst-id') || '2109');
-    setPaymentMethods(localStorage.getItem('fms-pay-methods') || '1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
-    setChallanNote(localStorage.getItem('fms-note') || 'Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
-    setValidUntilDays(parseInt(localStorage.getItem('fms-valid-days') || '10'));
-    setLateFine(parseInt(localStorage.getItem('fms-late-fine') || '500'));
-
     // Inject dynamic @page style for A4 landscape
     const styleEl = document.createElement('style');
     styleEl.id = 'print-page-style-landscape';
     styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 5mm !important; } }`;
     document.head.appendChild(styleEl);
-
-    fetchMonthFees();
-    fetchClasses();
 
     return () => {
       const el = document.getElementById('print-page-style-landscape');
@@ -123,29 +85,23 @@ export default function GenerateFees() {
     };
   }, []);
 
+  useEffect(() => {
+    fetchMonthFees();
+    fetchClassList().then(setClasses).catch(() => console.error("Failed to fetch classes"));
+  }, [fetchMonthFees]);
+
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const result = ev.target?.result as string;
-        setLogo(result);
-        try {
-          localStorage.setItem('fms-school-logo', result);
-        } catch(e) {
+        if (!setLogo(ev.target?.result as string)) {
           alert('Image too large for local storage! Please select a smaller logo (under 2MB).');
         }
       };
       reader.readAsDataURL(file);
     }
   };
-
-  const handleSaveName = (e: React.FocusEvent<HTMLHeadingElement>) => {
-    const text = e.currentTarget.textContent || 'YOUR SCHOOL NAME';
-    setSchoolName(text);
-    localStorage.setItem('fms-school-name', text);
-  };
-
 
   const [selectedClass, setSelectedClass] = useState('all');
 
@@ -192,7 +148,33 @@ export default function GenerateFees() {
     }, 200);
   };
 
-  const calculateTotal = () => filteredFees.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+  const handleBulkCharge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const label = bulkLabel.trim();
+    const amount = parseFloat(bulkAmount) || 0;
+    if (!confirm(`Add ${label} of Rs. ${amount} to all ${filteredFees.length} voucher(s) shown? Vouchers that already have a "${label}" charge are left as they are.`)) return;
+    setAddingCharge(true);
+    try {
+      const res = await fetch('/api/fees', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: filteredFees.map((f) => f.id), charge: { label, amount } })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || 'Failed to add the charge.');
+        return;
+      }
+      alert(`${label} added to ${data.added} voucher(s).${data.skipped ? ` ${data.skipped} skipped (already had it, or too old to change).` : ''}`);
+      setShowBulkCharge(false);
+      setBulkLabel('');
+      setBulkAmount('');
+      fetchMonthFees(genMonth, genYear);
+    } finally {
+      setAddingCharge(false);
+    }
+  };
+
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
@@ -207,7 +189,7 @@ export default function GenerateFees() {
           <div>
             <label className="form-label">Year</label>
             <select className="form-input" value={genYear} onChange={e => {setGenYear(e.target.value); fetchMonthFees(genMonth, e.target.value);}}>
-              {Array.from({length: 5}, (_, i) => (new Date().getFullYear() - 2 + i).toString()).map(y => <option key={y} value={y}>{y}</option>)}
+              {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           <div style={{flex: 1}}>
@@ -257,7 +239,7 @@ export default function GenerateFees() {
                  className="form-input" 
                  style={{height: '35px', fontSize: '0.85rem', maxWidth: '200px'}}
                  value={schoolName}
-                 onChange={e => {setSchoolName(e.target.value); localStorage.setItem('fms-school-name', e.target.value);}}
+                 onChange={e => setSchoolName(e.target.value)}
                />
                <input 
                  type="text" 
@@ -265,58 +247,78 @@ export default function GenerateFees() {
                  className="form-input" 
                  style={{height: '35px', fontSize: '0.85rem'}}
                  value={schoolAddress}
-                 onChange={e => {setSchoolAddress(e.target.value); localStorage.setItem('fms-school-address', e.target.value);}}
+                 onChange={e => setSchoolAddress(e.target.value)}
                />
             </div>
             <div style={{width: '1px', height: '25px', background: 'var(--border)'}}></div>
             <strong style={{color: 'var(--text-main)', whiteSpace: 'nowrap'}}>Logo:</strong>
             <input type="file" accept="image/*" onChange={handleLogoUpload} style={{fontSize: '0.8rem'}} />
-            {logo && <button className="btn btn-secondary" onClick={() => {setLogo(''); localStorage.removeItem('fms-school-logo');}} style={{padding: '0.4rem'}}>Remove</button>}
+            {logo && <button className="btn btn-secondary" onClick={() => clearStoredSetting('fms-school-logo')} style={{padding: '0.4rem'}}>Remove</button>}
             
-            <button className="btn btn-secondary" onClick={() => setShowConfig(!showConfig)} style={{padding: '0.4rem 1rem', marginLeft: 'auto'}}>
+            {has('charges') && (
+              <button className="btn btn-secondary" onClick={() => setShowBulkCharge(!showBulkCharge)} style={{padding: '0.4rem 1rem'}}>
+                 + Charge for all shown
+              </button>
+            )}
+            <button className="btn btn-secondary" onClick={() => setShowConfig(!showConfig)} style={{padding: '0.4rem 1rem', marginLeft: has('charges') ? undefined : 'auto'}}>
                ⚙️ Challan Config
             </button>
           </div>
+
+          {showBulkCharge && has('charges') && (
+            <form onSubmit={handleBulkCharge} className="glass-panel no-print" style={{padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap'}}>
+              <div style={{flex: '2 1 200px'}}>
+                <label className="form-label">Charge (e.g. Examination Fee)</label>
+                <input required className="form-input" list="bulk-charge-names" value={bulkLabel} onChange={e => setBulkLabel(e.target.value)} />
+                <datalist id="bulk-charge-names">
+                  {COMMON_CHARGES.map((name) => <option key={name} value={name} />)}
+                </datalist>
+              </div>
+              <div style={{flex: '1 1 120px'}}>
+                <label className="form-label">Amount (Rs.)</label>
+                <input required type="number" min="1" className="form-input" value={bulkAmount} onChange={e => setBulkAmount(e.target.value)} />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={addingCharge || filteredFees.length === 0} style={{height: '42px'}}>
+                {addingCharge ? 'Adding...' : `Add to ${filteredFees.length} voucher(s)`}
+              </button>
+              <p style={{flexBasis: '100%', margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)'}}>
+                Goes on every voucher in the list below ({genMonth} {genYear}{selectedClass !== 'all' ? `, ${selectedClass}` : ', all classes'}{searchQuery ? ', matching the search' : ''}). It is added to what each student owes and shows on the challan.
+              </p>
+            </form>
+          )}
 
           {showConfig && (
             <div className="glass-panel no-print" style={{padding: '2rem', marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', backdropFilter: 'blur(10px)'}}>
                <div>
                   <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK NAME</label>
-                  <input className="form-input" value={bankName} onChange={e => {setBankName(e.target.value); localStorage.setItem('fms-bank-name', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                  <input className="form-input" value={bankName} onChange={e => setBankName(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                </div>
                <div>
                   <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK BRANCH / ADDRESS</label>
-                  <input className="form-input" value={bankBranch} onChange={e => {setBankBranch(e.target.value); localStorage.setItem('fms-bank-branch', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                  <input className="form-input" value={bankBranch} onChange={e => setBankBranch(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                </div>
                <div>
                   <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT TITLE</label>
-                  <input className="form-input" value={bankAccountTitle} onChange={e => {setBankAccountTitle(e.target.value); localStorage.setItem('fms-bank-title', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                  <input className="form-input" value={bankAccountTitle} onChange={e => setBankAccountTitle(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                </div>
                <div>
                   <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT NUMBER</label>
-                  <input className="form-input" value={bankAccountNo} onChange={e => {setBankAccountNo(e.target.value); localStorage.setItem('fms-bank-no', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                  <input className="form-input" value={bankAccountNo} onChange={e => setBankAccountNo(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                </div>
                <div style={{display: 'flex', gap: '1.5rem'}}>
                   <div style={{flex: 1.5}}>
                     <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>INSTITUTE ID</label>
-                    <input className="form-input" value={instituteId} onChange={e => {setInstituteId(e.target.value); localStorage.setItem('fms-inst-id', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                    <input className="form-input" value={instituteId} onChange={e => setInstituteId(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                   </div>
-                  <div style={{flex: 1}}>
-                    <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--secondary)', marginBottom: '0.8rem'}}>DAYS VALID</label>
-                    <input type="number" className="form-input" value={validUntilDays} onChange={e => {setValidUntilDays(parseInt(e.target.value)); localStorage.setItem('fms-valid-days', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-                  </div>
-                  <div style={{flex: 1.2}}>
-                    <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--danger)', marginBottom: '0.8rem'}}>LATE FINE</label>
-                    <input type="number" className="form-input" value={lateFine} onChange={e => {setLateFine(parseInt(e.target.value)); localStorage.setItem('fms-late-fine', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-                  </div>
+                  <FeeSettingsFields settings={feeSettings} canEdit={canEditFees} onSave={saveFeeSettings} inputStyle={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
                </div>
                <div style={{gridColumn: '1 / -1'}}>
                   <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>PAYMENT METHODS (ONE PER LINE)</label>
-                  <textarea className="form-input" rows={3} value={paymentMethods} onChange={e => {setPaymentMethods(e.target.value); localStorage.setItem('fms-pay-methods', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.8rem'}} />
+                  <textarea className="form-input" rows={3} value={paymentMethods} onChange={e => setPaymentMethods(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.8rem'}} />
                </div>
                <div style={{gridColumn: '1 / -1'}}>
                   <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>CHALLAN FOOTER NOTE</label>
-                  <input className="form-input" value={challanNote} onChange={e => {setChallanNote(e.target.value); localStorage.setItem('fms-note', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.85rem'}} />
+                  <input className="form-input" value={challanNote} onChange={e => setChallanNote(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.85rem'}} />
                </div>
             </div>
           )}
@@ -348,14 +350,19 @@ export default function GenerateFees() {
                     </td>
                     <td style={{fontSize: '0.85rem'}}>{f.className}</td>
                     <td>{f.month} {f.year}</td>
-                    <td>Rs. {f.amount}</td>
+                    <td>
+                      Rs. {f.amount}
+                      {(f.charges ?? []).length > 0 && (
+                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>incl. {(f.charges ?? []).map((c) => `${c.label} ${c.amount}`).join(', ')}</div>
+                      )}
+                    </td>
                     <td style={{color: '#64748b'}}>Rs. {f.previousArrears || 0}</td>
                     <td style={{fontWeight: 700, color: '#e11d48'}}>
-                      Rs. {(Number(f.amount) + Number(f.previousArrears || 0)) - Number(f.paidTuition || 0)}
+                      Rs. {f.balanceDue ?? 0}
                     </td>
                     <td><span className={`badge ${f.status === 'Paid' ? 'badge-success' : f.status === 'Partially Paid' ? 'badge-warning' : 'badge-danger'}`} style={{fontSize: '0.75rem'}}>{f.status}</span></td>
                     <td>
-                      <div style={{display: 'flex', gap: '0.4rem'}}>
+                      <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.4rem', minWidth: '150px'}}>
                         <button 
                            className="btn btn-primary" 
                            style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem'}}
@@ -363,8 +370,17 @@ export default function GenerateFees() {
                         >
                            Print
                         </button>
-                        <button 
-                           className="btn" 
+                        {has('charges') && (
+                          <button
+                             className="btn btn-secondary"
+                             style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem'}}
+                             onClick={() => setChargesFor(f)}
+                          >
+                             Charges
+                          </button>
+                        )}
+                        <button
+                           className="btn"
                            style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem', background: '#e11d48', color: 'white', border: 'none'}}
                            onClick={async () => {
                              if(confirm(`Are you sure you want to REVERSE voucher #${f.id} for ${f.studentName}? This will undo any payment.`)) {
@@ -373,7 +389,7 @@ export default function GenerateFees() {
                                  alert('Fee reversed successfully.');
                                  fetchMonthFees(genMonth, genYear);
                                } else {
-                                 alert('Failed to reverse fee.');
+                                 alert((await res.json().catch(() => null))?.error || 'Failed to reverse fee.');
                                }
                              }
                            }}
@@ -388,20 +404,29 @@ export default function GenerateFees() {
             </table>
           </div>
 
+          {chargesFor && (
+            <div className="no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+              <div className="glass-panel" style={{width: '100%', maxWidth: '480px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto'}}>
+                <h2 style={{marginBottom: '0.25rem'}}>Charges on voucher #{chargesFor.id}</h2>
+                <p style={{marginBottom: '1.25rem'}}>{chargesFor.studentName}, {chargesFor.month} {chargesFor.year}. Added on top of the monthly fee (admission fee, exam fee...).</p>
+                <VoucherCharges
+                  voucher={chargesFor}
+                  onCancel={() => setChargesFor(null)}
+                  onSaved={() => { setChargesFor(null); fetchMonthFees(genMonth, genYear); }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="print-container print-only">
             {(printTargetId === -1 ? filteredFees : (printTargetId ? filteredFees.filter(f => f.id?.toString() === printTargetId?.toString()) : [])).map(f => {
-              const totalAmount = Number(f.amount) + Number(f.remainingAnnualCharges || 0) + Number(f.previousArrears || 0);
-              const qrData = `ID:${f.id}|ADM:${f.admissionNumber}|NAME:${f.studentName}|TOTAL:${totalAmount}`;
-              const qrURL = `https://chart.googleapis.com/chart?chs=100x100&cht=qr&chl=${encodeURIComponent(qrData)}`;
-              const validDate = new Date();
-              validDate.setDate(validDate.getDate() + validUntilDays);
-
               return (
                 <div key={f.id} className="voucher-card">
                   {['Bank Copy', 'Student Copy', 'Information'].map((section, sectionIdx) => (
                     <div key={section} className="voucher-copy" style={{
                       borderRight: sectionIdx < 2 ? '1px solid #000' : 'none',
                     }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
                       {logo && <img src={logo} alt="Watermark" className="logo-watermark" />}
                       <div className="voucher-content">
                          {sectionIdx < 2 ? (
@@ -431,34 +456,7 @@ export default function GenerateFees() {
                              </div>
 
                              {/* Table */}
-                             <table className="challan-table">
-                                <thead>
-                                   <tr><th>Particulars</th><th style={{width: '30%'}}>Amount</th></tr>
-                                </thead>
-                                <tbody>
-                                   <tr><td>Monthly Tuition Fee</td><td style={{textAlign: 'right'}}>{f.baseAmount || f.amount}</td></tr>
-                                   {f.discount > 0 && <tr><td>Less: Discount</td><td style={{textAlign: 'right', color: 'red'}}>- {f.discount}</td></tr>}
-                                   {f.previousArrears > 0 && <tr><td>Previous Arrears</td><td style={{textAlign: 'right'}}>{f.previousArrears}</td></tr>}
-                                   {f.remainingAnnualCharges > 0 && <tr><td>Annual Charges O/S</td><td style={{textAlign: 'right'}}>{f.remainingAnnualCharges}</td></tr>}
-                                   <tr style={{fontWeight: 900, background: '#f8fafc'}}>
-                                      <td><strong>Total (Within Due Date)</strong></td>
-                                      <td style={{textAlign: 'right'}}><strong>PKR {totalAmount.toLocaleString()}</strong></td>
-                                   </tr>
-                                   <tr style={{fontWeight: 900, background: '#fff1f2', color: '#e11d48'}}>
-                                      <td><strong>Total (After Due Date)</strong></td>
-                                      <td style={{textAlign: 'right'}}><strong>PKR {(totalAmount + lateFine).toLocaleString()}</strong></td>
-                                   </tr>
-                                </tbody>
-                             </table>
-
-                             <div style={{fontSize: '7.5pt', margin: '2mm 0'}}>
-                                <strong>Amount in Words (PKR)</strong>
-                                <div style={{textTransform: 'uppercase', marginTop: '1mm', borderBottom: '0.5px solid #ccc', paddingBottom: '1mm'}}>{numberToWords(totalAmount)}</div>
-                             </div>
-
-                             <div style={{fontSize: '11pt', fontWeight: 900, margin: '3mm 0'}}>
-                                Valid Upto: {validDate.toLocaleDateString('en-GB')}
-                             </div>
+                             <ChallanBill voucher={f} settings={feeSettings} />
 
                              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto'}}>
                                 <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Student Signature</div>
@@ -478,6 +476,7 @@ export default function GenerateFees() {
                              </div>
                              
                              <div style={{textAlign: 'center', marginTop: '5mm'}}>
+                                {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
                                 {logo && <img src={logo} alt="Logo" style={{width: '80px', height: '80px', objectFit: 'contain', opacity: 0.8}} />}
                                 <div style={{fontSize: '9pt', fontWeight: 800, marginTop: '2mm'}}>{schoolName}</div>
                                 <div style={{fontSize: '7pt'}}>{schoolAddress}</div>

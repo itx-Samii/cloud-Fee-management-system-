@@ -1,20 +1,83 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import '../generate/generate.css';
+import { clearStoredSetting, useStoredSetting } from '@/lib/useStoredSetting';
+import { useFeeSettings } from '@/lib/useFeeSettings';
+import { isLeft, monthlyBill, yearOptions } from '@/lib/fees';
+import ChallanBill from '../components/ChallanBill';
+import FeeSettingsFields from '../components/FeeSettingsFields';
+import type { Charge, FeeVoucher, RecordId, SchoolClass, Student } from '@/lib/types';
 
-function numberToWords(num: number): string {
-  const ones = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
-  const tens = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
-  const convert = (n: number): string => {
-    if (n < 20) return ones[n];
-    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + ones[n % 10] : '');
-    if (n < 1000) return ones[Math.floor(n / 100)] + ' HUNDRED' + (n % 100 !== 0 ? ' AND ' + convert(n % 100) : '');
-    if (n < 100000) return convert(Math.floor(n / 1000)) + ' THOUSAND' + (n % 1000 !== 0 ? ' ' + convert(n % 1000) : '');
-    if (n < 10000000) return convert(Math.floor(n / 100000)) + ' LAKH' + (n % 100000 !== 0 ? ' ' + convert(n % 100000) : '');
-    return n.toString();
-  };
-  if (num === 0) return 'ZERO';
-  return convert(Math.floor(num)) + ' ONLY';
+/** A student of the selected class merged with their voucher for the chosen month (if any). */
+type TrackingRow = Student & {
+  studentName: string;
+  amount: number;
+  baseAmount?: number;
+  charges?: Charge[];
+  status: string;
+  paymentDate?: string | null;
+  voucherId: RecordId | null;
+  month: string;
+  year: string;
+  previousArrears: number;
+  paidTuition: number;
+  remainingAnnualCharges?: number;
+  className?: string;
+  lateFine?: number;
+  fineWaived?: boolean;
+  balanceDue?: number;
+  dueDate?: string;
+  /** The student has left (status here is the voucher's, so it can't say). */
+  left: boolean;
+};
+
+async function fetchTrackingRows(month: string, year: string, classId: string): Promise<TrackingRow[]> {
+  const [feesRes, studentsRes] = await Promise.all([
+    fetch(`/api/fees?month=${month}&year=${year}`, { cache: 'no-store' }),
+    fetch(`/api/students?classId=${classId}&limit=1000`, { cache: 'no-store' })
+  ]);
+
+  const feesData = await feesRes.json();
+  const fees: FeeVoucher[] = Array.isArray(feesData) ? feesData : [];
+
+  const studentData = await studentsRes.json();
+  const studentsOfClass: Student[] = studentData.students || [];
+
+  // Students who have left only show up for months they were billed.
+  const billed = (student: Student) => fees.find((f) => f.studentId?.toString() === student.id?.toString());
+  return studentsOfClass.filter((student) => !isLeft(student) || billed(student)).map((student) => {
+    const feeRecord = billed(student);
+    return {
+      ...student,
+      studentName: student.name,
+      fatherName: student.fatherName,
+      amount: feeRecord ? feeRecord.amount : monthlyBill(student),
+      baseAmount: feeRecord ? feeRecord.baseAmount : student.monthlyFee,
+      charges: feeRecord ? feeRecord.charges : student.monthlyCharges,
+      discount: feeRecord ? feeRecord.discount : student.discount,
+      status: feeRecord ? feeRecord.status : 'Not Generated',
+      paymentDate: feeRecord ? feeRecord.paymentDate : null,
+      voucherId: feeRecord ? feeRecord.id : null,
+      month: feeRecord ? feeRecord.month : month,
+      year: feeRecord ? feeRecord.year : year,
+      previousArrears: feeRecord ? (feeRecord.previousArrears || 0) : 0,
+      paidTuition: feeRecord ? (feeRecord.paidTuition || 0) : 0,
+      remainingAnnualCharges: feeRecord
+        ? feeRecord.remainingAnnualCharges
+        : (student.annualCharges || 0) - (student.paidAnnualCharges || 0),
+      lateFine: feeRecord?.lateFine,
+      fineWaived: feeRecord?.fineWaived,
+      balanceDue: feeRecord?.balanceDue,
+      dueDate: feeRecord?.dueDate,
+      left: isLeft(student),
+    };
+  });
+}
+
+async function fetchClassList(): Promise<SchoolClass[]> {
+  const res = await fetch('/api/classes');
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
 export default function ClassWiseTracking() {
@@ -23,121 +86,67 @@ export default function ClassWiseTracking() {
   const [month, setMonth] = useState(currentMonth);
   const [year, setYear] = useState(currentYear);
   const [classId, setClassId] = useState('1');
-  const [classes, setClasses] = useState<any[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [statusFilter, setStatusFilter] = useState('all');
-  const [trackingData, setTrackingData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [search, setSearch] = useState('');
+  const [trackingData, setTrackingData] = useState<TrackingRow[]>([]);
+  // Starts true because a class is preselected; selecting a class or period sets it again.
+  const [loading, setLoading] = useState(true);
 
-  // Print & Logo States
-  const [schoolName, setSchoolName] = useState('YOUR SCHOOL NAME');
-  const [schoolAddress, setSchoolAddress] = useState('Rawalpindi, Pakistan');
-  const [logo, setLogo] = useState('');
-  const [printTargetId, setPrintTargetId] = useState<number | null>(null);
-  const [printTargetRecord, setPrintTargetRecord] = useState<any | null>(null);
+  // Print & Logo States (branding is saved in this browser)
+  const [schoolName, setSchoolName] = useStoredSetting('fms-school-name', 'YOUR SCHOOL NAME');
+  const [schoolAddress, setSchoolAddress] = useStoredSetting('fms-school-address', 'Rawalpindi, Pakistan');
+  const [logo, setLogo] = useStoredSetting('fms-school-logo', '');
+  const [printTargetId, setPrintTargetId] = useState<RecordId | null>(null);
+  const [printTargetRecord, setPrintTargetRecord] = useState<TrackingRow | null>(null);
 
   // Professional Branding States
-  const [bankName, setBankName] = useState('Meezan Bank Limited');
-  const [bankBranch, setBankBranch] = useState('Bank Road Sadar, Rawalpindi');
-  const [bankAccountTitle, setBankAccountTitle] = useState('YOUR SCHOOL SYSTEM');
-  const [bankAccountNo, setBankAccountNo] = useState('0000-000000-0000');
-  const [instituteId, setInstituteId] = useState('2109');
-  const [paymentMethods, setPaymentMethods] = useState('1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
-  const [challanNote, setChallanNote] = useState('Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
-  const [validUntilDays, setValidUntilDays] = useState(10);
-  const [lateFine, setLateFine] = useState(500);
+  const [bankName, setBankName] = useStoredSetting('fms-bank-name', 'Meezan Bank Limited');
+  const [bankBranch, setBankBranch] = useStoredSetting('fms-bank-branch', 'Bank Road Sadar, Rawalpindi');
+  const [bankAccountTitle, setBankAccountTitle] = useStoredSetting('fms-bank-title', 'YOUR SCHOOL SYSTEM');
+  const [bankAccountNo, setBankAccountNo] = useStoredSetting('fms-bank-no', '0000-000000-0000');
+  const [instituteId, setInstituteId] = useStoredSetting('fms-inst-id', '2109');
+  const [paymentMethods, setPaymentMethods] = useStoredSetting('fms-pay-methods', '1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
+  const [challanNote, setChallanNote] = useStoredSetting('fms-note', 'Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
+  // Due days and late fine are school-wide (the server charges the fine), not per browser.
+  const { settings: feeSettings, save: saveFeeSettings, canEdit: canEditFees } = useFeeSettings();
   const [showConfig, setShowConfig] = useState(false);
 
   // Edit Modal States
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editingStudent, setEditingStudent] = useState<any>(null);
+  const [editingStudent, setEditingStudent] = useState<TrackingRow | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchTracking = async () => {
-    if (!classId) return [];
-    setLoading(true);
-    try {
-      const [feesRes, studentsRes] = await Promise.all([
-        fetch(`/api/fees?month=${month}&year=${year}`, { cache: 'no-store' }),
-        fetch(`/api/students?classId=${classId}&limit=1000`, { cache: 'no-store' })
-      ]);
-      
-      let fees = await feesRes.json();
-      if (!Array.isArray(fees)) fees = [];
-      
-      const studentData = await studentsRes.json();
-      const studentsOfClass = studentData.students || [];
-      
-      const merged = studentsOfClass.map((student: any) => {
-        // FIX: Use toString() on both sides — fees.studentId is number, student.id is string
-        const feeRecord = fees.find((f: any) => f.studentId?.toString() === student.id?.toString());
-        return {
-          ...student,
-          studentName: student.name,
-          fatherName: student.fatherName,
-          amount: feeRecord ? feeRecord.amount : student.monthlyFee - (student.discount || 0),
-          baseAmount: feeRecord ? feeRecord.baseAmount : student.monthlyFee,
-          discount: feeRecord ? feeRecord.discount : student.discount,
-          status: feeRecord ? feeRecord.status : 'Not Generated',
-          paymentDate: feeRecord ? feeRecord.paymentDate : null,
-          voucherId: feeRecord ? feeRecord.id : null,
-          month: feeRecord ? feeRecord.month : month,
-          year: feeRecord ? feeRecord.year : year,
-          previousArrears: feeRecord ? (feeRecord.previousArrears || 0) : 0,
-          paidTuition: feeRecord ? (feeRecord.paidTuition || 0) : 0,
-          remainingAnnualCharges: feeRecord
-            ? feeRecord.remainingAnnualCharges
-            : (student.annualCharges || 0) - (student.paidAnnualCharges || 0)
-        };
-      });
-
-      setTrackingData(merged);
-      return merged;
-    } catch (err: any) {
-      console.error("Tracking Fetch Error:", err);
-      alert(`Failed to load tracking data: ${err.message || 'Unknown error'}`);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch('/api/classes');
-      const data = await res.json();
-      setClasses(data || []);
-      if (data && data.length > 0 && !classId) {
-        setClassId(data[0].id.toString());
-      }
-    } catch {
-      console.error("Failed to fetch classes");
-    }
-  };
+  const fetchTracking = useCallback(
+    () =>
+      fetchTrackingRows(month, year, classId)
+        .then((rows) => {
+          setTrackingData(rows);
+          return rows;
+        })
+        .catch((err): TrackingRow[] => {
+          console.error("Tracking Fetch Error:", err);
+          alert(`Failed to load tracking data: ${(err instanceof Error && err.message) || 'Unknown error'}`);
+          return [];
+        })
+        .finally(() => setLoading(false)),
+    [month, year, classId]
+  );
 
   useEffect(() => {
-    setMounted(true);
-    setSchoolName(localStorage.getItem('fms-school-name') || 'YOUR SCHOOL NAME');
-    setSchoolAddress(localStorage.getItem('fms-school-address') || 'Rawalpindi, Pakistan');
-    setLogo(localStorage.getItem('fms-school-logo') || '');
-
-    setBankName(localStorage.getItem('fms-bank-name') || 'Meezan Bank Limited');
-    setBankBranch(localStorage.getItem('fms-bank-branch') || 'Bank Road Sadar, Rawalpindi');
-    setBankAccountTitle(localStorage.getItem('fms-bank-title') || 'YOUR SCHOOL SYSTEM');
-    setBankAccountNo(localStorage.getItem('fms-bank-no') || '0000-000000-0000');
-    setInstituteId(localStorage.getItem('fms-inst-id') || '2109');
-    setPaymentMethods(localStorage.getItem('fms-pay-methods') || '1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
-    setChallanNote(localStorage.getItem('fms-note') || 'Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
-    setValidUntilDays(parseInt(localStorage.getItem('fms-valid-days') || '10'));
-    setLateFine(parseInt(localStorage.getItem('fms-late-fine') || '500'));
-
     // Inject dynamic @page style for A4 landscape
     const styleEl = document.createElement('style');
     styleEl.id = 'print-page-style-tracking';
     styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 5mm !important; } }`;
     document.head.appendChild(styleEl);
 
-    fetchClasses();
+    fetchClassList()
+      .then((data) => {
+        setClasses(data);
+        // Keep the chosen class if it exists here, otherwise start with the first one.
+        setClassId((current) => (data.length === 0 || data.some((c) => c.id.toString() === current) ? current : data[0].id.toString()));
+      })
+      .catch(() => console.error("Failed to fetch classes"));
 
     return () => {
       const el = document.getElementById('print-page-style-tracking');
@@ -149,14 +158,16 @@ export default function ClassWiseTracking() {
     if (classId) {
       fetchTracking();
     }
-  }, [month, year, classId]);
+  }, [classId, fetchTracking]);
 
-  const handlePrintAction = async (student: any) => {
+  const selectedClassObj = classes.find(c => c.id.toString() === classId);
+
+  const handlePrintAction = async (student: TrackingRow) => {
     setLoading(true);
     try {
       // Always re-fetch to ensure we have the absolute latest data before printing
       const latestData = await fetchTracking();
-      let target = latestData.find((d: any) => d.id?.toString() === student.id?.toString());
+      let target = latestData.find((d) => d.id?.toString() === student.id?.toString());
 
       // If voucher not generated, generate it now
       if (!target?.voucherId) {
@@ -171,7 +182,7 @@ export default function ClassWiseTracking() {
         }
         // Re-fetch to get the new voucher ID
         const refreshedData = await fetchTracking();
-        target = refreshedData.find((d: any) => d.id?.toString() === student.id?.toString());
+        target = refreshedData.find((d) => d.id?.toString() === student.id?.toString());
       }
 
       if (!target?.voucherId) {
@@ -180,7 +191,7 @@ export default function ClassWiseTracking() {
       }
 
       // Enrich with className from classes list (avoid stale class names)
-      const classObj = classes.find((c: any) => c.id?.toString() === target.classId?.toString());
+      const classObj = classes.find((c) => c.id?.toString() === target.classId?.toString());
       const resolvedTarget = {
         ...target,
         className: classObj ? `${classObj.name}${classObj.section ? ' - ' + classObj.section : ''}` : target.className || `Class ${target.classId}`
@@ -196,9 +207,9 @@ export default function ClassWiseTracking() {
         setPrintTargetId(null);
         setPrintTargetRecord(null);
       }, 400);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Print challan error:', err);
-      alert(`Print failed: ${err.message || 'Unknown error'}`);
+      alert(`Print failed: ${(err instanceof Error && err.message) || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -206,18 +217,23 @@ export default function ClassWiseTracking() {
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editingStudent) return;
     setIsSaving(true);
     try {
+      // Only what this form edits: the row also carries voucher fields (its status is the voucher's).
+      const { id, name, fatherName, monthlyFee, discount } = editingStudent;
       const res = await fetch('/api/students', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingStudent)
+        body: JSON.stringify({ id, name, fatherName, monthlyFee, discount })
       });
       if (res.ok) {
         setShowEditModal(false);
         fetchTracking();
+      } else {
+        alert((await res.json().catch(() => null))?.error || "Failed to save changes");
       }
-    } catch (err) {
+    } catch {
       alert("Failed to save changes");
     } finally {
       setIsSaving(false);
@@ -227,12 +243,18 @@ export default function ClassWiseTracking() {
   const paidCount = trackingData.filter(d => d.status === 'Paid').length;
   const unpaidCount = trackingData.filter(d => d.status === 'Unpaid' || d.status === 'Not Generated').length;
 
+  const needle = search.trim().toLowerCase();
+  const shownRows = trackingData
+    .filter(d => statusFilter === 'all' || d.status === statusFilter || (statusFilter === 'Unpaid' && d.status === 'Not Generated'))
+    .filter(d => !needle || [d.studentName, d.fatherName, d.admissionNumber, d.parentPhone, d.voucherId].some(v => String(v ?? '').toLowerCase().includes(needle)));
+
   return (
     <div>
       {/* Print-Only Report Header (Only for List Printing) */}
       {!printTargetId && (
         <div className="print-only" style={{marginBottom: '2rem', borderBottom: '2px solid #000', paddingBottom: '1rem'}}>
           <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem'}}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
             {logo && <img src={logo} alt="Logo" style={{height: '60px', width: '60px', objectFit: 'contain', marginRight: '15px'}} />}
             <div style={{textAlign: 'center'}}>
               <h1 style={{margin: 0, fontSize: '1.8rem', color: '#000'}}>{schoolName}</h1>
@@ -240,7 +262,7 @@ export default function ClassWiseTracking() {
             </div>
           </div>
           <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 600, color: '#000'}}>
-            <span>Class: {classes.find(c => c.id.toString() === classId)?.name || 'N/A'} {classes.find(c => c.id.toString() === classId)?.section ? `(${classes.find(c => c.id.toString() === classId).section})` : ''}</span>
+            <span>Class: {selectedClassObj?.name || 'N/A'} {selectedClassObj?.section ? `(${selectedClassObj.section})` : ''}</span>
             <span>Session: {month} {year}</span>
             <span>Date: {new Date().toLocaleDateString()}</span>
           </div>
@@ -258,7 +280,7 @@ export default function ClassWiseTracking() {
               <input 
                 type="text" 
                 value={schoolName} 
-                onChange={e => { setSchoolName(e.target.value); localStorage.setItem('fms-school-name', e.target.value); }} 
+                onChange={e => setSchoolName(e.target.value)} 
                 className="form-input" 
                 style={{padding: '0.2rem 0.5rem', fontSize: '0.85rem', width: '200px', border: 'none', background: 'transparent', textAlign: 'right', fontWeight: 800, display: 'block'}}
                 placeholder="School Name"
@@ -266,7 +288,7 @@ export default function ClassWiseTracking() {
               <input 
                 type="text" 
                 value={schoolAddress} 
-                onChange={e => { setSchoolAddress(e.target.value); localStorage.setItem('fms-school-address', e.target.value); }} 
+                onChange={e => setSchoolAddress(e.target.value)} 
                 className="form-input" 
                 style={{padding: '0.2rem 0.5rem', fontSize: '0.7rem', width: '200px', border: 'none', background: 'transparent', textAlign: 'right', fontWeight: 600, display: 'block'}}
                 placeholder="Location & Contact"
@@ -276,8 +298,9 @@ export default function ClassWiseTracking() {
            <div style={{position: 'relative'}}>
               {logo ? (
                 <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
                   <img src={logo} alt="Logo" style={{height: '35px', width: '35px', objectFit: 'contain', borderRadius: '4px'}} />
-                  <button onClick={() => { setLogo(''); localStorage.removeItem('fms-school-logo'); }} style={{background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.2rem'}} title="Remove Logo">×</button>
+                  <button onClick={() => clearStoredSetting('fms-school-logo')} style={{background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.2rem'}} title="Remove Logo">×</button>
                 </div>
               ) : (
                 <label style={{cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600}}>
@@ -295,11 +318,7 @@ export default function ClassWiseTracking() {
                           }
                           const reader = new FileReader();
                           reader.onload = (ev) => {
-                            const res = ev.target?.result as string;
-                            setLogo(res);
-                            try {
-                              localStorage.setItem('fms-school-logo', res);
-                            } catch (storageErr) {
+                            if (!setLogo(ev.target?.result as string)) {
                               alert('Logo is too large to save locally. Please use a smaller image (under 2MB).');
                             }
                           };
@@ -321,49 +340,52 @@ export default function ClassWiseTracking() {
         <div className="glass-panel no-print" style={{padding: '2rem', marginBottom: '2rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', backdropFilter: 'blur(10px)'}}>
            <div>
               <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK NAME</label>
-              <input className="form-input" value={bankName} onChange={e => {setBankName(e.target.value); localStorage.setItem('fms-bank-name', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+              <input className="form-input" value={bankName} onChange={e => setBankName(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
            </div>
            <div>
               <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK BRANCH / ADDRESS</label>
-              <input className="form-input" value={bankBranch} onChange={e => {setBankBranch(e.target.value); localStorage.setItem('fms-bank-branch', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+              <input className="form-input" value={bankBranch} onChange={e => setBankBranch(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
            </div>
            <div>
               <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT TITLE</label>
-              <input className="form-input" value={bankAccountTitle} onChange={e => {setBankAccountTitle(e.target.value); localStorage.setItem('fms-bank-title', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+              <input className="form-input" value={bankAccountTitle} onChange={e => setBankAccountTitle(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
            </div>
            <div>
               <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT NUMBER</label>
-              <input className="form-input" value={bankAccountNo} onChange={e => {setBankAccountNo(e.target.value); localStorage.setItem('fms-bank-no', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+              <input className="form-input" value={bankAccountNo} onChange={e => setBankAccountNo(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
            </div>
            <div style={{display: 'flex', gap: '1.5rem'}}>
               <div style={{flex: 1.5}}>
                 <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>INSTITUTE ID</label>
-                <input className="form-input" value={instituteId} onChange={e => {setInstituteId(e.target.value); localStorage.setItem('fms-inst-id', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
+                <input className="form-input" value={instituteId} onChange={e => setInstituteId(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
               </div>
-              <div style={{flex: 1}}>
-                <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--secondary)', marginBottom: '0.8rem'}}>DAYS VALID</label>
-                <input type="number" className="form-input" value={validUntilDays} onChange={e => {setValidUntilDays(parseInt(e.target.value)); localStorage.setItem('fms-valid-days', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-              </div>
-              <div style={{flex: 1.2}}>
-                <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--danger)', marginBottom: '0.8rem'}}>LATE FINE</label>
-                <input type="number" className="form-input" value={lateFine} onChange={e => {setLateFine(parseInt(e.target.value)); localStorage.setItem('fms-late-fine', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-              </div>
+              <FeeSettingsFields settings={feeSettings} canEdit={canEditFees} onSave={saveFeeSettings} inputStyle={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
            </div>
            <div style={{gridColumn: '1 / -1'}}>
               <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>PAYMENT METHODS (ONE PER LINE)</label>
-              <textarea className="form-input" rows={3} value={paymentMethods} onChange={e => {setPaymentMethods(e.target.value); localStorage.setItem('fms-pay-methods', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.8rem'}} />
+              <textarea className="form-input" rows={3} value={paymentMethods} onChange={e => setPaymentMethods(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.8rem'}} />
            </div>
            <div style={{gridColumn: '1 / -1'}}>
               <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>CHALLAN FOOTER NOTE</label>
-              <input className="form-input" value={challanNote} onChange={e => {setChallanNote(e.target.value); localStorage.setItem('fms-note', e.target.value);}} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.85rem'}} />
+              <input className="form-input" value={challanNote} onChange={e => setChallanNote(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.85rem'}} />
            </div>
         </div>
       )}
 
-      <div className="glass-panel no-print" style={{padding: '1.5rem', marginBottom: '2rem', display: 'flex', gap: '1rem'}}>
-        <div style={{flex: 1}}>
+      <div className="glass-panel no-print" style={{padding: '1.5rem', marginBottom: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1rem'}}>
+        <div style={{flex: '2 1 240px'}}>
+          <label className="form-label">Search</label>
+          <input
+            type="search"
+            className="form-input"
+            placeholder="Name, father name, adm no, phone or voucher no..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div style={{flex: '1 1 150px'}}>
           <label className="form-label">Select Class</label>
-          <select className="form-input" value={classId} onChange={e => setClassId(e.target.value)}>
+          <select className="form-input" value={classId} onChange={e => { if (e.target.value === classId) return; setClassId(e.target.value); setLoading(Boolean(e.target.value)); }}>
             <option value="">-- Choose Class --</option>
             {classes.map(c => (
               <option key={c.id} value={c.id}>
@@ -372,21 +394,21 @@ export default function ClassWiseTracking() {
             ))}
           </select>
         </div>
-        <div style={{flex: 1}}>
+        <div style={{flex: '1 1 150px'}}>
           <label className="form-label">Month</label>
-          <select className="form-input" value={month} onChange={e => setMonth(e.target.value)}>
+          <select className="form-input" value={month} onChange={e => { if (e.target.value === month) return; setMonth(e.target.value); setLoading(Boolean(classId)); }}>
             {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
         </div>
-        <div style={{flex: 1}}>
+        <div style={{flex: '1 1 150px'}}>
           <label className="form-label">Year</label>
-          <select className="form-input" value={year} onChange={e => setYear(e.target.value)}>
-            {Array.from({length: 5}, (_, i) => (new Date().getFullYear() - 2 + i).toString()).map(y => <option key={y} value={y}>{y}</option>)}
+          <select className="form-input" value={year} onChange={e => { if (e.target.value === year) return; setYear(e.target.value); setLoading(Boolean(classId)); }}>
+            {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
-        <div style={{flex: 1}}>
+        <div style={{flex: '1 1 150px'}}>
           <label className="form-label">Filter View</label>
           <select className="form-input" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="all">All Students</option>
@@ -428,20 +450,23 @@ export default function ClassWiseTracking() {
               <tr><td colSpan={8} style={{textAlign: 'center', padding: '2rem'}}>Processing records...</td></tr>
             ) : trackingData.length === 0 ? (
               <tr><td colSpan={8} style={{textAlign: 'center', padding: '2rem', color: 'var(--text-muted)'}}>No students found in this class.</td></tr>
+            ) : shownRows.length === 0 ? (
+              <tr><td colSpan={8} style={{textAlign: 'center', padding: '2rem', color: 'var(--text-muted)'}}>No students in this class match the search or filter.</td></tr>
             ) : (
-              trackingData
-                .filter(d => statusFilter === 'all' || d.status === statusFilter || (statusFilter === 'Unpaid' && d.status === 'Not Generated'))
-                .map((d, idx) => (
+              shownRows.map((d, idx) => (
                 <tr key={d.id} style={{background: (d.status === 'Unpaid' || d.status === 'Not Generated') ? 'rgba(239, 68, 68, 0.05)' : 'transparent'}}>
                   <td style={{color: 'var(--text-muted)'}}>#{idx + 1}</td>
                   <td style={{fontWeight: 700}}>{d.admissionNumber || 'N/A'}</td>
                   <td>
-                    <div style={{fontWeight: 600}}>{d.studentName}</div>
+                    <div style={{fontWeight: 600}}>
+                      {d.studentName}
+                      {d.left && <span className="badge badge-neutral" style={{marginLeft: '0.5rem'}}>Left</span>}
+                    </div>
                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>S/O: {d.fatherName || 'N/A'}</div>
                   </td>
                   <td>Rs. {d.amount}</td>
                   <td style={{color: '#64748b'}}>Rs. {Number(d.previousArrears || 0) + Number(d.remainingAnnualCharges || 0)}</td>
-                  <td style={{fontWeight: 700, color: '#e11d48'}}>Rs. {(Number(d.amount) + Number(d.remainingAnnualCharges || 0) + Number(d.previousArrears || 0)) - Number(d.paidTuition || 0)}</td>
+                  <td style={{fontWeight: 700, color: '#e11d48'}}>Rs. {d.balanceDue ?? Number(d.amount) + Number(d.remainingAnnualCharges || 0)}</td>
                   <td>
                     <span className={`badge ${d.status === 'Paid' ? 'badge-success' : d.status === 'Partially Paid' ? 'badge-warning' : (d.status === 'Unpaid' || d.status === 'Not Generated') ? 'badge-danger' : 'badge-warning'}`}>
                       {d.status === 'Paid' ? 'Submitted' : d.status === 'Partially Paid' ? 'Partial' : d.status === 'Unpaid' ? 'Defaulter' : 'Not Generated'}
@@ -472,7 +497,7 @@ export default function ClassWiseTracking() {
                             if(confirm(`Are you sure you want to REVERSE/DELETE this voucher #${d.voucherId}?`)) {
                               const res = await fetch(`/api/fees?id=${d.voucherId}`, { method: 'DELETE' });
                               if(res.ok) fetchTracking();
-                              else alert("Failed to reverse.");
+                              else alert((await res.json().catch(() => null))?.error || "Failed to reverse.");
                             }
                           }}
                         >
@@ -496,20 +521,20 @@ export default function ClassWiseTracking() {
             <form onSubmit={handleSaveEdit}>
               <div className="form-group">
                 <label className="form-label">Student Name</label>
-                <input required className="form-input" value={editingStudent.name} onChange={e => setEditingStudent({...editingStudent, name: e.target.value})} />
+                <input required className="form-input" value={editingStudent.name ?? ''} onChange={e => setEditingStudent({...editingStudent, name: e.target.value})} />
               </div>
               <div className="form-group">
                 <label className="form-label">Father Name</label>
-                <input required className="form-input" value={editingStudent.fatherName} onChange={e => setEditingStudent({...editingStudent, fatherName: e.target.value})} />
+                <input required className="form-input" value={editingStudent.fatherName ?? ''} onChange={e => setEditingStudent({...editingStudent, fatherName: e.target.value})} />
               </div>
               <div style={{display: 'flex', gap: '1rem'}}>
                 <div className="form-group" style={{flex: 1}}>
                   <label className="form-label">Base Fee (Rs.)</label>
-                  <input required type="number" className="form-input" value={isNaN(editingStudent.monthlyFee) ? '' : editingStudent.monthlyFee} onChange={e => setEditingStudent({...editingStudent, monthlyFee: parseFloat(e.target.value) || 0})} />
+                  <input required type="number" className="form-input" value={Number.isFinite(editingStudent.monthlyFee) ? editingStudent.monthlyFee : ''} onChange={e => setEditingStudent({...editingStudent, monthlyFee: parseFloat(e.target.value) || 0})} />
                 </div>
                 <div className="form-group" style={{flex: 1}}>
                   <label className="form-label">Discount (Rs.)</label>
-                  <input required type="number" className="form-input" value={isNaN(editingStudent.discount) ? '' : editingStudent.discount} onChange={e => setEditingStudent({...editingStudent, discount: parseFloat(e.target.value) || 0})} />
+                  <input required type="number" className="form-input" value={Number.isFinite(editingStudent.discount) ? editingStudent.discount : ''} onChange={e => setEditingStudent({...editingStudent, discount: parseFloat(e.target.value) || 0})} />
                 </div>
               </div>
               <div style={{display: 'flex', gap: '1rem', marginTop: '1.5rem'}}>
@@ -526,16 +551,13 @@ export default function ClassWiseTracking() {
       <div className="print-only">
         {printTargetRecord && (() => {
           const f = printTargetRecord;
-          const totalAmount = Number(f.amount) + Number(f.remainingAnnualCharges || 0) + Number(f.previousArrears || 0);
-          const validDate = new Date();
-          validDate.setDate(validDate.getDate() + validUntilDays);
-
           return (
             <div className="voucher-card">
               {['Bank Copy', 'Student Copy', 'Information'].map((section, sectionIdx) => (
                 <div key={section} className="voucher-copy" style={{
                   borderRight: sectionIdx < 2 ? '1px solid #000' : 'none',
                 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
                   {logo && <img src={logo} alt="Watermark" className="logo-watermark" />}
                   <div className="voucher-content">
                      {sectionIdx < 2 ? (
@@ -562,34 +584,7 @@ export default function ClassWiseTracking() {
                             <div className="info-item"><strong>Institute ID</strong> <span>{instituteId}</span></div>
                          </div>
 
-                         <table className="challan-table">
-                            <thead>
-                               <tr><th>Particulars</th><th style={{width: '30%'}}>Amount</th></tr>
-                            </thead>
-                            <tbody>
-                               <tr><td>Monthly Tuition Fee</td><td style={{textAlign: 'right'}}>{f.baseAmount || f.amount}</td></tr>
-                               {f.discount > 0 && <tr><td>Less: Discount</td><td style={{textAlign: 'right', color: 'red'}}>- {f.discount}</td></tr>}
-                               {f.previousArrears > 0 && <tr><td>Previous Arrears</td><td style={{textAlign: 'right'}}>{f.previousArrears}</td></tr>}
-                               {f.remainingAnnualCharges > 0 && <tr><td>Annual Charges O/S</td><td style={{textAlign: 'right'}}>{f.remainingAnnualCharges}</td></tr>}
-                               <tr style={{fontWeight: 900, background: '#f8fafc'}}>
-                                  <td><strong>Total (Within Due Date)</strong></td>
-                                  <td style={{textAlign: 'right'}}><strong>PKR {totalAmount.toLocaleString()}</strong></td>
-                               </tr>
-                               <tr style={{fontWeight: 900, background: '#fff1f2', color: '#e11d48'}}>
-                                  <td><strong>Total (After Due Date)</strong></td>
-                                  <td style={{textAlign: 'right'}}><strong>PKR {(totalAmount + lateFine).toLocaleString()}</strong></td>
-                               </tr>
-                            </tbody>
-                         </table>
-
-                         <div style={{fontSize: '7.5pt', margin: '2mm 0'}}>
-                            <strong>Amount in Words (PKR)</strong>
-                            <div style={{textTransform: 'uppercase', marginTop: '1mm', borderBottom: '0.5px solid #ccc', paddingBottom: '1mm'}}>{numberToWords(totalAmount)}</div>
-                         </div>
-
-                         <div style={{fontSize: '11pt', fontWeight: 900, margin: '3mm 0'}}>
-                            Valid Upto: {validDate.toLocaleDateString('en-GB')}
-                         </div>
+                         <ChallanBill voucher={f} settings={feeSettings} />
 
                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto'}}>
                             <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Student Signature</div>
@@ -607,6 +602,7 @@ export default function ClassWiseTracking() {
                             <p style={{fontSize: '7pt', color: '#444', margin: 0}}>{challanNote}</p>
                          </div>
                          <div style={{textAlign: 'center', marginTop: '5mm'}}>
+                            {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
                             {logo && <img src={logo} alt="Logo" style={{width: '80px', height: '80px', objectFit: 'contain', opacity: 0.8}} />}
                             <div style={{fontSize: '9pt', fontWeight: 800, marginTop: '2mm'}}>{schoolName}</div>
                             <div style={{fontSize: '7pt'}}>{schoolAddress}</div>

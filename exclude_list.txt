@@ -1,7 +1,0 @@
-node_modules
-.next
-.git
-.env
-School_Management_System
-.zip
-exclude_list.txt

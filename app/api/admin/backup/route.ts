@@ -1,39 +1,32 @@
 import { NextResponse } from 'next/server';
-import { readData, readConfig, getTenantId } from '@/lib/dbHandler';
+import { ADMIN, requireSession } from '@/lib/auth';
+import { audit } from '@/lib/audit';
+import { BACKUP_COLLECTIONS, findAll, readConfig } from '@/lib/dbHandler';
+import { jsonError } from '@/lib/http';
 
 export async function GET() {
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const { schoolId } = session;
+
   try {
-    const schoolId = await getTenantId();
+    const data: Record<string, unknown[]> = {};
+    for (const name of BACKUP_COLLECTIONS) {
+      data[name] = await findAll(name, schoolId);
+    }
+    const { schoolName } = await readConfig(schoolId);
+    await audit(session, 'backup.download', 'Downloaded a full backup');
 
-    const files = [
-      'students.json',
-      'fees.json',
-      'expenses.json',
-      'staff.json',
-      'salaries_history.json',
-      'classes.json',
-      'users.json'
-    ];
-
-    const backupData: any = {
+    return NextResponse.json({
       timestamp: new Date().toISOString(),
       system: 'School Pay ERP',
       schoolId,
-      data: {}
-    };
-
-    // Load each file scoped to the correct tenant
-    for (const file of files) {
-      const content = await readData<any>(file, schoolId);
-      backupData.data[file.replace('.json', '')] = content;
-    }
-
-    // Load tenant config
-    backupData.config = await readConfig(schoolId);
-
-    return NextResponse.json(backupData);
+      data,
+      // Login credentials are deliberately left out; restore never changes them.
+      config: { schoolName },
+    });
   } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'Failed to generate backup' }, { status: 500 });
+    console.error(`Backup failed for ${schoolId}:`, err);
+    return jsonError('Failed to generate backup', 500);
   }
 }

@@ -1,96 +1,117 @@
 import { NextResponse } from 'next/server';
-import { readData, writeData, generateId, getTenantId } from '@/lib/dbHandler';
+import { ADMIN, STAFF, requireFeature, requireSession } from '@/lib/auth';
+import { audit, describeChanges } from '@/lib/audit';
+import { deleteRecord, findAll, findById, insertRecord, updateRecord } from '@/lib/dbHandler';
+import { jsonError, optionalNumber, readBody, toNumber, toText, withoutUndefined } from '@/lib/http';
+import { isLeft } from '@/lib/fees';
+import type { SchoolClass, Student } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const schoolId = await getTenantId();
+  const session = await requireSession(STAFF);
+  if (session instanceof NextResponse) return session;
+  const { schoolId } = session;
+
   try {
-    const classes = await readData<any>('classes.json', schoolId);
-    const students = await readData<any>('students.json', schoolId);
+    const [classes, students] = await Promise.all([
+      findAll<SchoolClass>('classes', schoolId),
+      findAll<Student>('students', schoolId),
+    ]);
+    const counts = new Map<string, number>();
+    students.filter((s) => !isLeft(s)).forEach((s) => counts.set(String(s.classId), (counts.get(String(s.classId)) ?? 0) + 1));
 
-    const processedClasses = classes.map((c: any) => ({
-      ...c,
-      studentCount: students.filter((s: any) => s.classId?.toString() === c.id?.toString()).length
-    }));
-
-    const response = NextResponse.json(processedClasses);
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    response.headers.set('Pragma', 'no-cache');
-    response.headers.set('Expires', '0');
-    return response;
-  } catch (err: any) {
-    console.error(`Local JSON Classes GET Error for ${schoolId}:`, err);
-    return NextResponse.json({ error: 'Failed to fetch classes', details: err.message }, { status: 500 });
+    return NextResponse.json(
+      classes.map((c) => ({ ...c, studentCount: counts.get(String(c.id)) ?? 0 })),
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  } catch (err) {
+    console.error(`GET classes failed for ${schoolId}:`, err);
+    return jsonError('Failed to fetch classes', 500);
   }
 }
 
 export async function POST(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'classes');
+  if (locked) return locked;
+  const { schoolId } = session;
+
+  const body = await readBody(request);
+  const name = toText(body?.name);
+  if (!body || !name) return jsonError('Class name is required', 400);
+
   try {
-    const body = await request.json();
-    const { name, section, monthlyFee, annualCharges } = body;
-
-    const classes = await readData<any>('classes.json', schoolId);
-    const newId = await generateId('classes.json', schoolId);
-
-    const newClass = {
-      id: newId,
-      schoolId,
+    const created = await insertRecord('classes', schoolId, {
       name,
-      section,
-      monthlyFee: parseFloat(monthlyFee),
-      annualCharges: parseFloat(annualCharges || 0)
-    };
-
-    classes.push(newClass);
-    await writeData('classes.json', classes, schoolId);
-
-    return NextResponse.json(newClass);
-  } catch (err: any) {
-    console.error(`Local JSON Classes POST Error for ${schoolId}:`, err);
-    return NextResponse.json({ error: 'Failed to create class', details: err.message }, { status: 500 });
+      section: toText(body.section) ?? '',
+      monthlyFee: toNumber(body.monthlyFee),
+      annualCharges: toNumber(body.annualCharges),
+      createdAt: new Date().toISOString(),
+    });
+    await audit(session, 'class.add', `Added class ${name}${created.section ? ` - ${created.section}` : ''}`);
+    return NextResponse.json(created);
+  } catch (err) {
+    console.error(`POST class failed for ${schoolId}:`, err);
+    return jsonError('Failed to create class', 500);
   }
 }
 
 export async function PUT(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'classes');
+  if (locked) return locked;
+  const { schoolId } = session;
+
+  const body = await readBody(request);
+  const id = toText(body?.id);
+  if (!body || !id) return jsonError('ID is required', 400);
+
+  const changes = withoutUndefined({
+    name: toText(body.name) || undefined,
+    section: toText(body.section),
+    monthlyFee: optionalNumber(body.monthlyFee),
+    annualCharges: optionalNumber(body.annualCharges),
+  });
+
   try {
-    const body = await request.json();
-    const { id, ...updateData } = body;
-    if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+    const before = await findById<SchoolClass>('classes', schoolId, id);
+    const updated = before && (await updateRecord<SchoolClass>('classes', schoolId, before.id, changes));
+    if (!before || !updated) return jsonError('Class not found', 404);
 
-    const classes = await readData<any>('classes.json', schoolId);
-    const classIndex = classes.findIndex((c: any) => c.id.toString() === id.toString());
-    
-    if (classIndex === -1) {
-      return NextResponse.json({ error: 'Class not found' }, { status: 404 });
-    }
-
-    classes[classIndex] = { ...classes[classIndex], ...updateData };
-    await writeData('classes.json', classes, schoolId);
-
-    return NextResponse.json({ id, ...updateData });
-  } catch (err: any) {
-    console.error(`Local JSON Classes PUT Error for ${schoolId}:`, err);
-    return NextResponse.json({ error: 'Failed to update class', details: err.message }, { status: 500 });
+    const changed = describeChanges(before, changes, {
+      name: 'name',
+      section: 'section',
+      monthlyFee: 'monthly fee',
+      annualCharges: 'annual charges',
+    });
+    if (changed) await audit(session, 'class.edit', `Edited class ${before.name}: ${changed}`);
+    return NextResponse.json(updated);
+  } catch (err) {
+    console.error(`PUT class failed for ${schoolId}:`, err);
+    return jsonError('Failed to update class', 500);
   }
 }
 
 export async function DELETE(request: Request) {
-  const schoolId = await getTenantId();
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'classes');
+  if (locked) return locked;
+  const { schoolId } = session;
+
+  const id = new URL(request.url).searchParams.get('id');
+  if (!id) return jsonError('ID is required', 400);
+
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-
-    let classes = await readData<any>('classes.json', schoolId);
-    classes = classes.filter((c: any) => c.id.toString() !== id.toString());
-    await writeData('classes.json', classes, schoolId);
-
+    const cls = await findById<SchoolClass>('classes', schoolId, id);
+    if (!cls || !(await deleteRecord('classes', schoolId, cls.id))) return jsonError('Class not found', 404);
+    await audit(session, 'class.delete', `Deleted class ${cls.name}${cls.section ? ` - ${cls.section}` : ''}`);
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error(`Local JSON Classes DELETE Error for ${schoolId}:`, err);
-    return NextResponse.json({ error: 'Failed to delete class', details: err.message }, { status: 500 });
+  } catch (err) {
+    console.error(`DELETE class failed for ${schoolId}:`, err);
+    return jsonError('Failed to delete class', 500);
   }
 }

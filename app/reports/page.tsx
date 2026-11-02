@@ -1,10 +1,14 @@
 "use client";
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { exportToCSV } from '@/lib/exportUtils';
+import type { FeeVoucher, SchoolClass } from '@/lib/types';
+import { yearOptions } from '@/lib/fees';
 
 export default function CollectionReports() {
-  const [fees, setFees] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
+  const router = useRouter();
+  const [fees, setFees] = useState<FeeVoucher[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Filter States
@@ -14,41 +18,42 @@ export default function CollectionReports() {
   const [selectedYear, setSelectedYear] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
 
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch('/api/classes');
-      const data = await res.json();
-      setClasses(data || []);
-    } catch { console.error("Failed to fetch classes"); }
-  };
-
-  const fetchReportData = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/fees?limit=5000`, { cache: 'no-store' });
-      const data = await res.json();
-      setFees(data || []);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    // proxy.ts already keeps accountants out; this catches a role change during the visit.
     async function checkRole() {
       try {
         const res = await fetch('/api/auth/login');
         const data = await res.json();
-        if (data && data.user && data.user.role === 'accountant') {
-          window.location.href = '/unauthorized';
-        }
-      } catch {}
+        if (data?.user?.role === 'accountant') router.replace('/unauthorized');
+      } catch {
+        // offline: the API calls below will fail on their own
+      }
     }
+
+    async function fetchReportData() {
+      try {
+        const res = await fetch(`/api/fees?limit=5000`, { cache: 'no-store' });
+        const data = await res.json();
+        setFees(Array.isArray(data) ? data : []);
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function fetchClasses() {
+      try {
+        const res = await fetch('/api/classes');
+        const data = await res.json();
+        setClasses(Array.isArray(data) ? data : []);
+      } catch { console.error("Failed to fetch classes"); }
+    }
+
     checkRole();
     fetchReportData();
     fetchClasses();
-  }, []);
+  }, [router]);
 
   const filteredFees = fees.filter(f => {
     const matchSearch = !search || 
@@ -64,8 +69,8 @@ export default function CollectionReports() {
     return matchSearch && matchClass && matchMonth && matchYear && matchStatus && isNotACOnly;
   });
 
-  const totalBilled = filteredFees.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
-  const totalCollected = filteredFees.reduce((acc, f) => acc + (f.status === 'Paid' ? (parseFloat(f.paidTuition) || parseFloat(f.amount) || 0) : 0), 0);
+  const totalBilled = filteredFees.reduce((acc, f) => acc + (parseFloat(String(f.amount)) || 0), 0);
+  const totalCollected = filteredFees.reduce((acc, f) => acc + (f.status === 'Paid' ? (parseFloat(String(f.paidTuition)) || parseFloat(String(f.amount)) || 0) : 0), 0);
   const totalPending = Math.max(0, totalBilled - totalCollected); 
 
   return (
@@ -135,7 +140,7 @@ export default function CollectionReports() {
             <label className="form-label" style={{fontSize: '0.75rem', marginBottom: '0.5rem'}}>YEAR</label>
             <select className="form-input" style={{padding: '0.55rem 0.8rem'}} value={selectedYear} onChange={e => setSelectedYear(e.target.value)}>
               <option value="all">All</option>
-              {["2025", "2026", "2027"].map(y => (
+              {yearOptions().map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>

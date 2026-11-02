@@ -1,25 +1,61 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import './collection.css';
+import { useStoredSetting } from '@/lib/useStoredSetting';
+import { periodLabel, periodOf, tuitionOf } from '@/lib/fees';
+import { useFeeSettings } from '@/lib/useFeeSettings';
+import { useFeatures } from '@/lib/useFeatures';
+import { receiptMessage, whatsappLink } from '@/lib/whatsapp';
+import { VoucherCharges } from '../components/ChargesEditor';
+import type { Allocation, FeeVoucher, RecordId } from '@/lib/types';
+
+/** A voucher as shown here; right after a payment it also carries that payment's receipt. */
+type ShownVoucher = FeeVoucher & {
+  receiptNo?: RecordId;
+  receivedBy?: string;
+  receivedNow?: number;
+  allocations?: Allocation[];
+  /** Tuition already paid on this voucher before the payment being taken now. */
+  paidEarlier?: number;
+};
+
+/** Tuition owed now, arrears and late fines included (annual charges are taken separately). */
+const tuitionDue = (v: FeeVoucher) => Math.max(0, (v.balanceDue ?? 0) - (v.remainingAnnualCharges ?? 0));
+
+/** Late fines a payment today would charge (or could waive) on this voucher and its arrears. */
+const pendingFine = (v: FeeVoucher) =>
+  (v.fineCharged ? 0 : v.lateFine ?? 0) + (v.arrears ?? []).reduce((sum, line) => sum + (line.fine ?? 0), 0);
+
+const rs = (amount: number) => `Rs. ${amount.toLocaleString('en-US')}`;
+
+/** "November 2026 Rs. 3,000 · December 2026 Rs. 3,000 (advance)" */
+const appliedTo = (allocations: Allocation[]) =>
+  allocations.filter((a) => a.amount > 0).map((a) => `${periodLabel(a)} ${rs(a.amount)}${a.created ? ' (advance)' : ''}`).join(' · ');
 
 export default function FeeCollection() {
   const [search, setSearch] = useState('');
-  const [feeData, setFeeData] = useState<any>(null);
-  const [allFees, setAllFees] = useState<any[]>([]);
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [feeData, setFeeData] = useState<ShownVoucher | null>(null);
+  const [suggestions, setSuggestions] = useState<FeeVoucher[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  
+
   const [paidTuition, setPaidTuition] = useState<string>('');
   const [paidAC, setPaidAC] = useState<string>('0');
-  
-  const [mounted, setMounted] = useState(false);
-  const [schoolName, setSchoolName] = useState('TRUST SCHOOL SYSTEM');
-  const [schoolAddress, setSchoolAddress] = useState('Campus Address / Contact No');
-  const [logo, setLogo] = useState('');
+  const [waiveFine, setWaiveFine] = useState(false);
+  // Tuition beyond what is owed is kept as advance fee only when the cashier says so.
+  const [advance, setAdvance] = useState(false);
+  const [takingAdvance, setTakingAdvance] = useState(false);
+  const [editingCharges, setEditingCharges] = useState(false);
+  const { settings: feeSettings } = useFeeSettings();
+  const { has } = useFeatures();
+
+  const [schoolName, saveSchoolName] = useStoredSetting('fms-school-name', 'TRUST SCHOOL SYSTEM');
+  const [schoolAddress, saveSchoolAddress] = useStoredSetting('fms-school-address', 'Campus Address / Contact No');
+  const [logo] = useStoredSetting('fms-school-logo', '');
 
   // Pre-fetch all fees for rapid typeahead searching
   useEffect(() => {
@@ -29,18 +65,13 @@ export default function FeeCollection() {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    
+
     // Inject dynamic @page style for A4 portrait
     const styleEl = document.createElement('style');
     styleEl.id = 'print-page-style';
     styleEl.innerHTML = `@media print { @page { size: A4 portrait !important; margin: 8mm !important; } }`;
     document.head.appendChild(styleEl);
 
-    setMounted(true);
-    setSchoolName(localStorage.getItem('fms-school-name') || 'TRUST SCHOOL SYSTEM');
-    setSchoolAddress(localStorage.getItem('fms-school-address') || 'Campus Address / Contact No');
-    setLogo(localStorage.getItem('fms-school-logo') || '');
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       const el = document.getElementById('print-page-style');
@@ -49,15 +80,11 @@ export default function FeeCollection() {
   }, []);
 
   const handleSaveName = (e: React.FocusEvent<HTMLHeadingElement>) => {
-    const text = e.currentTarget.textContent || 'TRUST SCHOOL SYSTEM';
-    setSchoolName(text);
-    localStorage.setItem('fms-school-name', text);
+    saveSchoolName(e.currentTarget.textContent || 'TRUST SCHOOL SYSTEM');
   };
 
   const handleSaveAddress = (e: React.FocusEvent<HTMLParagraphElement>) => {
-    const text = e.currentTarget.textContent || 'Campus Address / Contact No';
-    setSchoolAddress(text);
-    localStorage.setItem('fms-school-address', text);
+    saveSchoolAddress(e.currentTarget.textContent || 'Campus Address / Contact No');
   };
 
   const handleSearchChange = async (val: string) => {
@@ -81,11 +108,26 @@ export default function FeeCollection() {
     }
   };
 
-  const selectStudent = (studentFee: any) => {
+  /** Shows a voucher with the full amount owed filled in, ready to take. */
+  const openVoucher = (voucher: FeeVoucher) => {
+    setFeeData({ ...voucher, paidEarlier: voucher.paidTuition || 0 });
+    setPaidTuition(String(tuitionDue(voucher)));
+    setPaidAC(String(voucher.remainingAnnualCharges || 0));
+    setWaiveFine(false);
+    setAdvance(false);
+    setTakingAdvance(false);
+    setEditingCharges(false);
+  };
+
+  const toggleWaiveFine = (waive: boolean) => {
+    if (!feeData) return;
+    setWaiveFine(waive);
+    setPaidTuition(String(Math.max(0, tuitionDue(feeData) - (waive ? pendingFine(feeData) : 0))));
+  };
+
+  const selectStudent = (studentFee: FeeVoucher) => {
     setSearch(studentFee.id.toString());
-    setFeeData(studentFee);
-    setPaidTuition(studentFee.amount.toString());
-    setPaidAC((studentFee.remainingAnnualCharges || 0).toString());
+    openVoucher(studentFee);
     setShowDropdown(false);
     setErrorMsg('');
   };
@@ -104,9 +146,7 @@ export default function FeeCollection() {
           const data = await res.json();
           const list = Array.isArray(data) ? data : (data.id ? [data] : []);
           if (list.length > 0) {
-             setFeeData(list[0]);
-             setPaidTuition(list[0].amount.toString());
-             setPaidAC((list[0].remainingAnnualCharges || 0).toString());
+             openVoucher(list[0]);
              setLoading(false);
              return;
           }
@@ -119,18 +159,16 @@ export default function FeeCollection() {
         const data = await res.json();
         const results = Array.isArray(data) ? data : [];
         if (results.length > 0) {
-          setFeeData(results[0]);
-          setPaidTuition(results[0].amount.toString());
-          setPaidAC((results[0].remainingAnnualCharges || 0).toString());
+          openVoucher(results[0]);
         } else {
           setErrorMsg("No active billing voucher found.");
         }
       } else {
         setErrorMsg("Search failed. Please check connection.");
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Search error:", error);
-      setErrorMsg(`Search failed: ${error.message || 'Check your internet or server'}`);
+      setErrorMsg(`Search failed: ${(error instanceof Error && error.message) || 'Check your internet or server'}`);
     } finally {
       setLoading(false);
     }
@@ -143,23 +181,29 @@ export default function FeeCollection() {
       const res = await fetch('/api/fees', {
         method: 'PUT',
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           id: feeData.id,
-          paidTuition: parseFloat(paidTuition),
-          paidAC: parseFloat(paidAC)
+          paidTuition: parseFloat(paidTuition) || 0,
+          paidAC: parseFloat(paidAC) || 0,
+          waiveFine,
+          advance
         })
       });
       const updated = await res.json();
       if (res.ok) {
-        // Correctly sync ALL updated data (status, paymentDate, paidTuition, paidAC, totalReceived)
-        setFeeData({ 
-          ...feeData, 
+        // The server sends the voucher back with fresh balances and the receipt. The printed receipt
+        // still lists the arrears and annual charges as they stood, since this payment covered them.
+        const waivedArrearsFines = waiveFine ? (feeData.arrears ?? []).reduce((sum, line) => sum + (line.fine ?? 0), 0) : 0;
+        setFeeData({
           ...updated,
-          remainingAnnualCharges: (feeData.remainingAnnualCharges || 0) - parseFloat(paidAC)
+          previousArrears: (feeData.previousArrears ?? 0) - waivedArrearsFines,
+          arrears: feeData.arrears,
+          remainingAnnualCharges: feeData.remainingAnnualCharges,
+          paidEarlier: feeData.paidEarlier,
+          receivedNow: (parseFloat(paidTuition) || 0) + (parseFloat(paidAC) || 0)
         });
-        
-        // Update the global list so search results show the new status
-        setAllFees(prev => prev.map(f => f.id?.toString() === updated.id?.toString() ? { ...f, ...updated } : f));
+        setTakingAdvance(false);
+        setAdvance(false);
 
         // trigger print wrapper
         setTimeout(() => window.print(), 300);
@@ -180,11 +224,11 @@ export default function FeeCollection() {
 
       <form onSubmit={handleSearch} className="glass-panel no-print" style={{padding: '2rem', display: 'flex', gap: '1rem', alignItems: 'flex-end', marginBottom: '2rem', position: 'relative'}}>
         <div style={{flex: 1, position: 'relative'}} ref={dropdownRef}>
-          <label className="form-label">Search by Name, Father's Name, or Voucher ID</label>
-          <input 
-            type="text" 
-            className="form-input" 
-            placeholder="Start typing name or father's name..." 
+          <label className="form-label">Search by Name, Father&apos;s Name, or Voucher ID</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="Start typing name or father's name..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             onFocus={() => { if(suggestions.length > 0) setShowDropdown(true); }}
@@ -192,17 +236,17 @@ export default function FeeCollection() {
             autoFocus
             autoComplete="off"
           />
-          
+
           {showDropdown && suggestions.length > 0 && (
             <ul style={{
               position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '0.25rem',
-              background: 'var(--bg-card)', border: '1px solid var(--border)', 
-              borderRadius: '8px', boxShadow: 'var(--shadow-card)', 
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: '8px', boxShadow: 'var(--shadow-card)',
               maxHeight: '300px', overflowY: 'auto', zIndex: 100, listStyle: 'none', margin: '0.25rem 0 0 0', padding: 0
             }}>
               {suggestions.map(s => (
-                <li 
-                  key={s.id} 
+                <li
+                  key={s.id}
                   onClick={() => selectStudent(s)}
                   className="dropdown-item"
                   style={{padding: '0.8rem 1rem', borderBottom: '1px solid var(--border)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}
@@ -237,6 +281,7 @@ export default function FeeCollection() {
       {feeData && (
         <div className="receipt-container" style={{maxWidth: '800px', margin: '0 auto'}}>
           <div className="physical-receipt">
+            {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
             {logo && <img src={logo} alt="Watermark" style={{
                 position: 'absolute',
                 top: '50%',
@@ -249,7 +294,7 @@ export default function FeeCollection() {
             }} />}
             {/* Header Section */}
             <div className="receipt-header-main" contentEditable suppressContentEditableWarning onBlur={handleSaveName}>
-              {mounted ? (schoolName === 'TRUST SCHOOL SYSTEM' ? "THE BROOK FIELD SCHOOL'S SYSTEM" : schoolName) : "THE BROOK FIELD SCHOOL'S SYSTEM"}
+              {schoolName === 'TRUST SCHOOL SYSTEM' ? "THE BROOK FIELD SCHOOL'S SYSTEM" : schoolName}
             </div>
 
             <div className="campus-grid">
@@ -262,7 +307,7 @@ export default function FeeCollection() {
             </div>
 
             <div className="contact-header-bar" contentEditable suppressContentEditableWarning onBlur={handleSaveAddress}>
-              {mounted ? (schoolAddress === 'Campus Address / Contact No' ? "Dhoke Hassu, Rawalpindi. Mob: 0333-5435678, 0345-5904708" : schoolAddress) : "Dhoke Hassu, Rawalpindi. Mob: 0333-5435678, 0345-5904708"}
+              {schoolAddress === 'Campus Address / Contact No' ? "Dhoke Hassu, Rawalpindi. Mob: 0333-5435678, 0345-5904708" : schoolAddress}
             </div>
 
             {/* Sub Header (Official Receipt + ID) */}
@@ -275,8 +320,8 @@ export default function FeeCollection() {
                   <span style={{background: '#3730a3', color: 'white', padding: '2px 15px', borderRadius: '4px', fontWeight: 900, fontSize: '0.8rem'}}>OFFICIAL RECEIPT</span>
                </div>
                <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
-                  <span style={{fontWeight: 800}}>No.</span>
-                  <span style={{fontSize: '1.5rem', fontWeight: 900, letterSpacing: '2px'}} contentEditable suppressContentEditableWarning>{feeData.id}</span>
+                  <span style={{fontWeight: 800}}>{feeData.receiptNo ? 'Receipt No.' : 'Voucher No.'}</span>
+                  <span style={{fontSize: '1.5rem', fontWeight: 900, letterSpacing: '2px'}}>{feeData.receiptNo ?? feeData.id}</span>
                </div>
             </div>
 
@@ -305,37 +350,49 @@ export default function FeeCollection() {
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>1. Admission Fee / Security</td>
-                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
-                </tr>
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>2. Tuition Fee (Month: {feeData.month})</td>
-                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>{feeData.baseAmount || feeData.amount}</td>
-                </tr>
-                {feeData.discount > 0 && (
-                  <tr>
-                    <td style={{color: 'var(--success)', fontWeight: 'bold'}} contentEditable suppressContentEditableWarning>3. Scholarship / Discount</td>
-                    <td style={{textAlign: 'right', color: 'var(--success)', fontWeight: 'bold'}} contentEditable suppressContentEditableWarning>- {feeData.discount}</td>
-                  </tr>
-                )}
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>4. Examination Fee</td>
-                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
-                </tr>
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>5. Previous Balance / Arrears</td>
-                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>{feeData.previousArrears || 0}</td>
-                </tr>
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>6. Annual Charges (AC) Pending</td>
-                  <td style={{textAlign: 'right', color: feeData.remainingAnnualCharges > 0 ? 'var(--danger)' : 'inherit'}} contentEditable suppressContentEditableWarning>{feeData.remainingAnnualCharges || 0}</td>
-                </tr>
-
-                <tr>
-                  <td contentEditable suppressContentEditableWarning>7. Fine / Other Charges</td>
-                  <td style={{textAlign: 'right'}} contentEditable suppressContentEditableWarning>0</td>
-                </tr>
+                {(() => {
+                  // Numbered as printed; the cashier can still retype a cell before printing.
+                  const success = {color: 'var(--success)', fontWeight: 'bold'} as const;
+                  const lines: { label: React.ReactNode; amount: React.ReactNode; style?: React.CSSProperties; amountStyle?: React.CSSProperties; numbered?: false }[] = [
+                    { label: `Tuition Fee (Month: ${feeData.month})`, amount: tuitionOf(feeData) },
+                    ...((feeData.discount ?? 0) > 0 ? [{ label: 'Scholarship / Discount', amount: `- ${feeData.discount}`, style: success }] : []),
+                    ...(feeData.charges ?? []).map((c) => ({ label: c.label, amount: c.amount })),
+                    ...((feeData.paidEarlier ?? 0) > 0
+                      ? [{ label: 'Less: Paid Earlier on This Voucher', amount: `- ${feeData.paidEarlier}`, style: {color: 'var(--success)'}, numbered: false as const }]
+                      : []),
+                    {
+                      label: (
+                        <>
+                          Previous Balance / Arrears
+                          {(feeData.arrears ?? []).length > 0 && (
+                            <span style={{fontSize: '0.8em', color: '#64748b'}}> ({(feeData.arrears ?? []).map((line) => periodLabel(line)).join(', ')})</span>
+                          )}
+                        </>
+                      ),
+                      amount: feeData.previousArrears || 0,
+                    },
+                    {
+                      label: 'Annual Charges (AC) Pending',
+                      amount: feeData.remainingAnnualCharges || 0,
+                      amountStyle: {color: (feeData.remainingAnnualCharges ?? 0) > 0 ? 'var(--danger)' : 'inherit'},
+                    },
+                    { label: `Late Fine${feeData.fineWaived ? ' (waived)' : ''}`, amount: feeData.lateFine || 0 },
+                  ];
+                  let no = 0;
+                  return lines.map((line, i) =>
+                    line.numbered === false ? (
+                      <tr key={i}>
+                        <td style={line.style}>{line.label}</td>
+                        <td style={{textAlign: 'right', ...line.style}}>{line.amount}</td>
+                      </tr>
+                    ) : (
+                      <tr key={i}>
+                        <td style={line.style} contentEditable suppressContentEditableWarning>{++no}. {line.label}</td>
+                        <td style={{textAlign: 'right', ...line.style, ...line.amountStyle}} contentEditable suppressContentEditableWarning>{line.amount}</td>
+                      </tr>
+                    )
+                  );
+                })()}
               </tbody>
             </table>
 
@@ -349,40 +406,132 @@ export default function FeeCollection() {
                     <div className="sig-item" contentEditable suppressContentEditableWarning>Sig./Stamp</div>
                  </div>
                  <div className="no-print" style={{marginTop: '30px', textAlign: 'center'}}>
-                    {feeData.status === 'Paid' || feeData.status === 'Partially Paid' ? (
-                       <p style={{color: 'var(--success)', fontWeight: 'bold'}}>✓ Payment recorded on {new Date(feeData.paymentDate).toLocaleDateString()}</p>
+                    {feeData.status === 'Paid' || feeData.status === 'Partially Paid' || feeData.receiptNo ? (
+                       <p style={{color: 'var(--success)', fontWeight: 'bold'}}>
+                         {feeData.receiptNo
+                           ? `✓ Receipt #${feeData.receiptNo} issued by ${feeData.receivedBy} (voucher #${feeData.id})`
+                           : `✓ Payment recorded${feeData.paymentDate ? ` on ${new Date(feeData.paymentDate).toLocaleDateString()}` : ''}`}
+                       </p>
                     ) : null}
                     <button className="btn btn-secondary" onClick={() => window.print()} style={{marginTop: '10px'}}>Print Receipt</button>
+                    {feeData.studentId != null && has('studentLedger') && (
+                      <Link href={`/ledger/${feeData.studentId}`} className="btn btn-secondary" style={{marginTop: '10px', marginLeft: '0.5rem'}}>Student Ledger</Link>
+                    )}
+                    {(() => {
+                      if (!feeData.receiptNo || !has('whatsapp')) return null;
+                      const months = (feeData.allocations ?? []).filter((a) => a.amount > 0).map((a) => periodLabel(a)).join(', ');
+                      const link = whatsappLink(feeData.parentPhone, receiptMessage({
+                        school: feeSettings.schoolName || 'the school',
+                        student: feeData.studentName ?? 'your child',
+                        amount: feeData.receivedNow ?? 0,
+                        receiptNo: feeData.receiptNo,
+                        months,
+                        balance: feeData.balanceDue ?? 0
+                      }));
+                      return link ? (
+                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn" style={{marginTop: '10px', marginLeft: '0.5rem', background: '#25D366', color: 'white', border: 'none'}}>Send on WhatsApp</a>
+                      ) : null;
+                    })()}
                  </div>
               </div>
 
-              <div className="calculation-box">
-                <div className="calc-row">
-                  <div className="calc-label">Total Payable</div>
-                  <div className="calc-value">{(feeData.baseAmount || feeData.amount) - (feeData.discount || 0) + (feeData.previousArrears || 0) + (feeData.remainingAnnualCharges || 0)}</div>
-                </div>
-                <div className="calc-row">
-                  <div className="calc-label">Total Received</div>
-                  <div className="calc-value">{feeData.totalReceived || 0}</div>
-                </div>
-                <div className="calc-row balance-row">
-                  <div className="calc-label">Pending / Bal.</div>
-                  <div className="calc-value">
-                    {Math.max(0, ((feeData.baseAmount || feeData.amount) - (feeData.discount || 0) + (feeData.previousArrears || 0) + (feeData.remainingAnnualCharges || 0)) - (feeData.totalReceived || 0))}
+              {(() => {
+                // Before saving, "received" previews the amounts typed in; afterwards it is the receipt.
+                // Money for months after this one (advance fee) is shown apart from what was owed.
+                const received = feeData.receivedNow ?? ((parseFloat(paidTuition) || 0) + (parseFloat(paidAC) || 0));
+                const owedNow = (feeData.balanceDue ?? 0) - (waiveFine && !feeData.receiptNo ? pendingFine(feeData) : 0);
+                const ahead = feeData.receiptNo
+                  ? (feeData.allocations ?? []).filter((a) => periodOf(a) > periodOf(feeData)).reduce((sum, a) => sum + a.amount, 0)
+                  : Math.max(0, received - owedNow);
+                const payable = feeData.receiptNo ? owedNow + received - ahead : owedNow;
+                return (
+                  <div className="calculation-box">
+                    <div className="calc-row">
+                      <div className="calc-label">Total Payable</div>
+                      <div className="calc-value">{payable}</div>
+                    </div>
+                    <div className="calc-row">
+                      <div className="calc-label">{feeData.receiptNo ? 'Received' : 'Receiving'}</div>
+                      <div className="calc-value">{received}</div>
+                    </div>
+                    {ahead > 0 && (
+                      <div className="calc-row">
+                        <div className="calc-label">Advance (coming months)</div>
+                        <div className="calc-value">{ahead}</div>
+                      </div>
+                    )}
+                    <div className="calc-row balance-row">
+                      <div className="calc-label">Pending / Bal.</div>
+                      <div className="calc-value">{Math.max(0, payable - received + ahead)}</div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
 
 
 
             </div>
 
+            {(feeData.allocations ?? []).length > 0 && (
+              <p style={{fontSize: '0.85rem', marginTop: '1rem'}}>
+                <strong>Applied to: </strong>
+                {appliedTo(feeData.allocations ?? [])}
+                {(feeData.allocations ?? []).some((a) => a.fineWaived) ? ' · late fine waived' : ''}
+              </p>
+            )}
+
+            {/* Charges on this voucher (No Print): admission fee, exam fee... */}
+            {!feeData.receiptNo && has('charges') && (
+              <div className="no-print" style={{marginTop: '1.5rem'}}>
+                {editingCharges ? (
+                  <div style={{border: '1px solid #ccc', borderRadius: '8px', padding: '1rem'}}>
+                    <p style={{fontWeight: 700, marginBottom: '0.75rem'}}>Charges on this voucher (on top of the monthly fee)</p>
+                    <VoucherCharges voucher={feeData} onSaved={openVoucher} onCancel={() => setEditingCharges(false)} />
+                  </div>
+                ) : (
+                  <button className="btn btn-secondary" onClick={() => setEditingCharges(true)}>
+                    {(feeData.charges ?? []).length > 0 ? 'Edit charges' : '+ Add admission / exam / other charge'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {(feeData.balanceDue ?? 0) <= 0 && !takingAdvance && feeData.studentId != null && has('advance') && (
+              <div className="no-print" style={{marginTop: '1rem'}}>
+                <button className="btn btn-secondary" onClick={() => { setTakingAdvance(true); setAdvance(true); setPaidTuition(''); setPaidAC('0'); }}>
+                  Receive advance fee for coming months
+                </button>
+              </div>
+            )}
+
             {/* Payment Controls (No Print) */}
-            {feeData.status !== 'Paid' && (
+            {((feeData.balanceDue ?? 0) > 0 || takingAdvance) && (
                <div className="no-print" style={{marginTop: '2rem', borderTop: '1px solid #ccc', paddingTop: '1rem'}}>
+                  {(feeData.arrears ?? []).length > 0 && (
+                    <p style={{fontSize: '0.9rem', marginBottom: '0.75rem'}}>
+                      Earlier months still owing (cleared first):{' '}
+                      {(feeData.arrears ?? []).map((line) => `${periodLabel(line)} ${rs(line.amount)}${line.fine ? ` incl. ${rs(line.fine)} fine` : ''}`).join(' · ')}
+                    </p>
+                  )}
+                  {pendingFine(feeData) > 0 && (
+                    <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--danger)', fontWeight: 600}}>
+                      <input type="checkbox" checked={waiveFine} onChange={(e) => toggleWaiveFine(e.target.checked)} />
+                      Waive late fine of {rs(pendingFine(feeData))} (recorded in the Activity Log)
+                    </label>
+                  )}
+                  {(() => {
+                    const extra = (parseFloat(paidTuition) || 0) - Math.max(0, tuitionDue(feeData) - (waiveFine ? pendingFine(feeData) : 0));
+                    if (extra <= 0 || !has('advance')) return null;
+                    return (
+                      <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontWeight: 600}}>
+                        <input type="checkbox" checked={advance} onChange={(e) => setAdvance(e.target.checked)} />
+                        Advance fee: keep the extra {rs(extra)} for the coming months (their vouchers are made now and marked paid)
+                      </label>
+                    );
+                  })()}
                   <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem'}}>
                      <div>
-                        <label className="form-label">Receive Tuition</label>
+                        <label className="form-label">Receive Tuition &amp; Charges</label>
                         <input type="number" className="form-input" value={paidTuition} onChange={e => setPaidTuition(e.target.value)} />
                      </div>
                      <div>

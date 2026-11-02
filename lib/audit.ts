@@ -1,0 +1,71 @@
+import { getDb } from './db';
+import { toNumber } from './http';
+import type { Session } from './session';
+
+// Append-only record of who changed what (the audit_log table), shown to principals on the
+// Activity Log page. Nothing in the app edits or deletes it, and backups/restores leave it alone.
+
+export type AuditAction =
+  | 'login'
+  | 'password.change'
+  | 'vouchers.generate'
+  | 'payment.receive'
+  | 'payment.reverse'
+  | 'voucher.delete'
+  | 'voucher.charges'
+  | 'student.add'
+  | 'student.edit'
+  | 'student.delete'
+  | 'student.import'
+  | 'class.add'
+  | 'class.edit'
+  | 'class.delete'
+  | 'expense.add'
+  | 'expense.delete'
+  | 'staff.add'
+  | 'staff.edit'
+  | 'staff.delete'
+  | 'salary.pay'
+  | 'salary.reverse'
+  | 'user.add'
+  | 'user.edit'
+  | 'user.delete'
+  | 'backup.download'
+  | 'backup.restore'
+  | 'settings.edit';
+
+/** "Rs. 12,500" */
+export function rupees(amount: unknown): string {
+  return `Rs. ${toNumber(amount).toLocaleString('en-US')}`;
+}
+
+/** "Exam Fee Rs. 500, Transport Rs. 2,000", or "none". */
+export function describeCharges(charges: { label: string; amount: number }[] | null | undefined): string {
+  return (charges ?? []).map((c) => `${c.label} ${rupees(c.amount)}`).join(', ') || 'none';
+}
+
+/** "monthly fee 3000 → 2500, discount 0 → 500" for the fields that actually changed. */
+export function describeChanges(before: object, after: object, labels: Record<string, string>): string {
+  const was = before as Record<string, unknown>;
+  const now = after as Record<string, unknown>;
+  return Object.entries(labels)
+    .filter(([field]) => field in now && String(now[field] ?? '') !== String(was[field] ?? ''))
+    .map(([field, label]) => `${label} ${String(was[field] ?? '-') || '-'} → ${String(now[field] ?? '-') || '-'}`)
+    .join(', ');
+}
+
+/**
+ * Adds a line to the school's Activity Log. A failed write is logged and swallowed: by now the
+ * action itself has happened, and the user must still be told it succeeded.
+ */
+export async function audit(session: Session, action: AuditAction, summary: string): Promise<void> {
+  try {
+    const db = await getDb();
+    // Millisecond times, so the Activity Log can page with "older than the last one shown".
+    await db`
+      insert into audit_log (school_id, at, username, display_name, role, action, summary)
+      values (${session.schoolId}, ${new Date().toISOString()}, ${session.username}, ${session.displayName}, ${session.role}, ${action}, ${summary})`;
+  } catch (err) {
+    console.error(`Audit log write failed (${action}):`, err);
+  }
+}

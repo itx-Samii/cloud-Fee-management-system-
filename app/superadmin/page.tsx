@@ -1,5 +1,9 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { reloadTo } from '@/lib/reloadTo';
+import { DEFAULT_FEATURES, FEATURES, FEATURE_KEYS, featureOn, type Features } from '@/lib/features';
+
+const FEATURE_GROUPS = ['Modules', 'Fee options', 'Tools'] as const;
 
 interface SaaSClient {
   id: string;
@@ -9,20 +13,15 @@ interface SaaSClient {
   status: string;
   maxStudents: number;
   currentStudents: number;
-  features?: {
-    collection?: boolean;
-    generate?: boolean;
-    tracking?: boolean;
-    reports?: boolean;
-    expenses?: boolean;
-    ledger?: boolean;
-    salaries?: boolean;
-    classes?: boolean;
-    students?: boolean;
-    users?: boolean;
-  };
+  features?: Partial<Features>;
   createdAt: string;
   lastSync: string;
+}
+
+async function fetchClientList(): Promise<SaaSClient[]> {
+  const res = await fetch('/api/superadmin/clients');
+  if (!res.ok) throw new Error('Unauthorized: Master Super Admin credentials required.');
+  return res.json();
 }
 
 export default function SuperAdminPage() {
@@ -37,7 +36,7 @@ export default function SuperAdminPage() {
   const [licenseKey, setLicenseKey] = useState('');
   const [maxStudents, setMaxStudents] = useState('1000');
   const [adminUsername, setAdminUsername] = useState('');
-  const [adminPassword, setAdminPassword] = useState('principal123');
+  const [adminPassword, setAdminPassword] = useState('');
 
   // Edit Modal State
   const [showEditModal, setShowEditModal] = useState(false);
@@ -48,42 +47,22 @@ export default function SuperAdminPage() {
   const [editAdminPassword, setEditAdminPassword] = useState('');
 
   // Feature Permissions Modal State
-  const defaultFeatures = {
-    collection: true,
-    generate: true,
-    tracking: true,
-    reports: true,
-    expenses: true,
-    ledger: true,
-    salaries: true,
-    classes: true,
-    students: true,
-    users: true
-  };
   const [showFeatureModal, setShowFeatureModal] = useState(false);
   const [featureClient, setFeatureClient] = useState<SaaSClient | null>(null);
-  const [clientFeatures, setClientFeatures] = useState(defaultFeatures);
+  const [clientFeatures, setClientFeatures] = useState<Features>(DEFAULT_FEATURES);
+
+  const fetchClients = useCallback(
+    () =>
+      fetchClientList()
+        .then(setClients)
+        .catch((err) => setError(err instanceof TypeError ? 'System network error.' : err.message))
+        .finally(() => setLoading(false)),
+    []
+  );
 
   useEffect(() => {
     fetchClients();
-  }, []);
-
-  const fetchClients = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/superadmin/clients');
-      if (res.ok) {
-        const data = await res.json();
-        setClients(data);
-      } else {
-        setError('Unauthorized: Master Super Admin credentials required.');
-      }
-    } catch {
-      setError('System network error.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchClients]);
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +83,7 @@ export default function SuperAdminPage() {
         setClientName('');
         setLicenseKey('');
         setAdminUsername('');
-        setAdminPassword('principal123');
+        setAdminPassword('');
         fetchClients();
       } else {
         setError(data.error || 'Failed to create SaaS client.');
@@ -158,7 +137,7 @@ export default function SuperAdminPage() {
 
   const openFeatureModal = (client: SaaSClient) => {
     setFeatureClient(client);
-    setClientFeatures({ ...defaultFeatures, ...(client.features || {}) });
+    setClientFeatures({ ...DEFAULT_FEATURES, ...(client.features || {}) });
     setShowFeatureModal(true);
   };
 
@@ -253,7 +232,7 @@ export default function SuperAdminPage() {
             onClick={() => {
               const oldPass = prompt("Enter Current Super Admin Password:");
               if (!oldPass) return;
-              const newPass = prompt("Enter New Super Admin Password (min 4 chars):");
+              const newPass = prompt("Enter New Super Admin Password (min 8 chars):");
               if (!newPass) return;
               const confirmPass = prompt("Confirm New Super Admin Password:");
               if (newPass !== confirmPass) {
@@ -268,7 +247,8 @@ export default function SuperAdminPage() {
               }).then(async res => {
                 if (res.ok) {
                   alert("Super Admin password changed successfully! Please login again.");
-                  window.location.href = '/login';
+                  await fetch('/api/auth/logout', { method: 'POST' });
+                  reloadTo('/login');
                 } else {
                   const err = await res.json();
                   alert("Error: " + (err.error || "Failed to update password"));
@@ -301,7 +281,7 @@ export default function SuperAdminPage() {
           </div>
           <div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Distributed Clients</div>
-            <div style={{ fontSize: '2.25rem', fontWeight: 800, color: 'white' }}>{clients.length}</div>
+            <div style={{ fontSize: '2.25rem', fontWeight: 800, color: 'var(--text-main)' }}>{clients.length}</div>
           </div>
         </div>
 
@@ -340,14 +320,14 @@ export default function SuperAdminPage() {
 
       {/* SaaS Clients Table */}
       <div className="glass-panel" style={{ padding: '2rem' }}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 1.5rem', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 1.5rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span>📜</span> Master Client Directory
         </h2>
 
         {loading ? (
           <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '1.1rem' }}>Loading SaaS client databases...</div>
         ) : clients.length === 0 ? (
-          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>No licensed client schools found. Click "Issue New License" to onboard a school.</div>
+          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>No licensed client schools found. Click &quot;Issue New License&quot; to onboard a school.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -365,7 +345,7 @@ export default function SuperAdminPage() {
               <tbody>
                 {clients.map((c) => (
                   <tr key={c.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }}>
-                    <td style={{ padding: '1.35rem 1rem', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{c.clientName}</td>
+                    <td style={{ padding: '1.35rem 1rem', fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-main)' }}>{c.clientName}</td>
                     <td style={{ padding: '1.35rem 1rem', fontFamily: 'monospace', fontSize: '0.95rem', color: '#c084fc' }}>{c.schoolId || c.id || 'school_brookfield'}</td>
                     <td style={{ padding: '1.35rem 1rem', fontFamily: 'monospace', fontSize: '1.05rem', color: '#38bdf8', letterSpacing: '0.05em' }}>{c.licenseKey}</td>
                     <td style={{ padding: '1.35rem 1rem' }}>
@@ -405,7 +385,7 @@ export default function SuperAdminPage() {
                           style={{ padding: '0.5rem 0.85rem', fontSize: '0.85rem', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)' }}
                           title="Manage Module Permissions"
                         >
-                          🧩 Features
+                          🧩 Features ({FEATURE_KEYS.filter((key) => featureOn(c.features, key)).length}/{FEATURE_KEYS.length})
                         </button>
                         <button
                           onClick={() => openEditModal(c)}
@@ -455,20 +435,20 @@ export default function SuperAdminPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>⚡</span>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'white' }}>Issue School License</h3>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Issue School License</h3>
               </div>
               <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
             </div>
 
             <form onSubmit={handleCreateClient} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
                 <input
                   required
                   type="text"
                   placeholder="e.g. Beaconhouse School System"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
                   autoFocus
@@ -476,39 +456,40 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>PRINCIPAL LOGIN USERNAME</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>PRINCIPAL LOGIN USERNAME</label>
                 <input
                   required
                   type="text"
                   placeholder="e.g. admin_beaconhouse"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={adminUsername}
                   onChange={(e) => setAdminUsername(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>INITIAL PRINCIPAL PASSWORD</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>INITIAL PRINCIPAL PASSWORD</label>
                 <input
                   required
                   type="text"
-                  placeholder="principal123"
+                  placeholder="At least 8 characters"
+                  minLength={8}
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
                     required
                     type="text"
                     className="form-input"
-                    style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#f59e0b', fontSize: '1.05rem', fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.05em' }}
+                    style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#f59e0b', fontSize: '1.05rem', fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.05em' }}
                     value={licenseKey}
                     onChange={(e) => setLicenseKey(e.target.value)}
                   />
@@ -525,12 +506,12 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
                 <input
                   type="number"
                   placeholder="1000"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={maxStudents}
                   onChange={(e) => setMaxStudents(e.target.value)}
                 />
@@ -565,43 +546,43 @@ export default function SuperAdminPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>✏️</span>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'white' }}>Modify School License & Profile</h3>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Modify School License & Profile</h3>
               </div>
               <button onClick={() => setShowEditModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
             </div>
 
             <form onSubmit={handleUpdateClient} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
                 <input
                   required
                   type="text"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={editClientName}
                   onChange={(e) => setEditClientName(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
                 <input
                   required
                   type="text"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', fontSize: '1.05rem', fontFamily: 'monospace', fontWeight: 700 }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', fontSize: '1.05rem', fontFamily: 'monospace', fontWeight: 700 }}
                   value={editLicenseKey}
                   onChange={(e) => setEditLicenseKey(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
                 <input
                   required
                   type="number"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={editMaxStudents}
                   onChange={(e) => setEditMaxStudents(e.target.value)}
                 />
@@ -611,12 +592,12 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}>RESET PRINCIPAL PASSWORD (OPTIONAL)</label>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>RESET PRINCIPAL PASSWORD (OPTIONAL)</label>
                 <input
                   type="text"
                   placeholder="Leave blank to keep unchanged"
                   className="form-input"
-                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255, 255, 255, 0.15)', color: 'white', fontSize: '1.05rem' }}
+                  style={{ width: '100%', padding: '0.85rem 1rem', borderRadius: '12px', background: 'var(--bg-body)', border: '1px solid var(--border)', color: 'var(--text-main)', fontSize: '1.05rem' }}
                   value={editAdminPassword}
                   onChange={(e) => setEditAdminPassword(e.target.value)}
                 />
@@ -651,146 +632,53 @@ export default function SuperAdminPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>🧩</span>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'white' }}>Manage Feature Access</h3>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Manage Feature Access</h3>
               </div>
               <button onClick={() => setShowFeatureModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
             </div>
 
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.25rem', flexShrink: 0 }}>
-              Toggle ERP modules on/off for <strong style={{ color: 'white' }}>{featureClient.clientName}</strong>. Locked modules will be inaccessible.
+              Toggle ERP modules on/off for <strong style={{ color: 'var(--text-main)' }}>{featureClient.clientName}</strong>. Locked modules will be inaccessible.
             </p>
 
             <form onSubmit={handleUpdateFeatures} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', overflowY: 'auto', paddingRight: '0.5rem', maxHeight: '50vh' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>💰 Receive Payment</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Student fee collection & challan processing</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.collection}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, collection: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', overflowY: 'auto', paddingRight: '0.5rem', maxHeight: '55vh' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" className="btn" onClick={() => setClientFeatures(DEFAULT_FEATURES)} style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem', background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.4)' }}>
+                    All on
+                  </button>
+                  <button type="button" className="btn" onClick={() => setClientFeatures(Object.fromEntries(FEATURE_KEYS.map((key) => [key, false])) as Features)} style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
+                    All off
+                  </button>
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>⚡ Generate Vouchers</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Monthly fee voucher generation & distribution</div>
+                {FEATURE_GROUPS.map((group) => (
+                  <div key={group} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#c084fc', marginTop: '0.5rem' }}>{group}</div>
+                    {FEATURE_KEYS.filter((key) => FEATURES[key].group === group).map((key) => {
+                      const feature = FEATURES[key];
+                      // Ticked but still off because something it needs is off.
+                      const offBecause = feature.needs && !featureOn(clientFeatures, feature.needs) ? FEATURES[feature.needs].label : null;
+                      return (
+                        <label key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.85rem 1rem', background: 'var(--bg-body)', borderRadius: '12px', border: '1px solid var(--border)', cursor: 'pointer', opacity: offBecause ? 0.6 : 1 }}>
+                          <div>
+                            <div style={{ fontWeight: 700, color: 'var(--text-main)', marginBottom: '2px' }}>{feature.icon} {feature.label}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              {feature.description}
+                              {offBecause && <span style={{ color: '#f59e0b' }}> (stays off while {offBecause} is off)</span>}
+                            </div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            aria-label={feature.label}
+                            checked={clientFeatures[key]}
+                            onChange={(e) => setClientFeatures({ ...clientFeatures, [key]: e.target.checked })}
+                            style={{ width: '22px', height: '22px', cursor: 'pointer', flexShrink: 0 }}
+                          />
+                        </label>
+                      );
+                    })}
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.generate}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, generate: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>📈 Class-wise Tracking</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Track paid & unpaid vouchers class-by-class</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.tracking}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, tracking: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>📑 Financial Reports</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Comprehensive financial analysis & audit sheets</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.reports}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, reports: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>🧾 Expense Manager</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Track utility bills, maintenance & general expenses</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.expenses}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, expenses: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>🏛️ AC Ledger</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Master school accounting ledger & cash flow</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.ledger}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, ledger: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>💵 Salaries Manager</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Manage staff payroll and monthly allowances</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.salaries}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, salaries: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>🏫 Classes Management</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Manage school grades, sections, and tuition fees</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.classes}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, classes: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>🎓 All Students</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Complete student directory and admissions</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.students}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, students: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'white', marginBottom: '2px' }}>🛡️ Users & Roles</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Manage staff logins, accountants & admin roles</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={clientFeatures.users}
-                    onChange={(e) => setClientFeatures({ ...clientFeatures, users: e.target.checked })}
-                    style={{ width: '22px', height: '22px', cursor: 'pointer' }}
-                  />
-                </div>
+                ))}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem', flexShrink: 0, borderTop: '1px solid var(--border)', paddingTop: '1.25rem' }}>

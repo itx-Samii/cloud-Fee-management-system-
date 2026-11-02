@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 interface User {
   id: number;
@@ -8,6 +8,12 @@ interface User {
   role: string;
   status: string;
   createdAt: string;
+}
+
+async function fetchUserList(): Promise<User[]> {
+  const res = await fetch('/api/users');
+  if (!res.ok) throw new Error('Failed to fetch user list. Ensure you are logged in as Administrator.');
+  return res.json();
 }
 
 export default function UsersPage() {
@@ -34,26 +40,18 @@ export default function UsersPage() {
   const [modifyUsername, setModifyUsername] = useState('');
   const [modifyLoading, setModifyLoading] = useState(false);
 
+  const fetchUsers = useCallback(
+    () =>
+      fetchUserList()
+        .then(setUsers)
+        .catch((err) => setError(err instanceof TypeError ? 'System network error.' : err.message))
+        .finally(() => setLoading(false)),
+    []
+  );
+
   useEffect(() => {
     fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/users');
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
-      } else {
-        setError('Failed to fetch user list. Ensure you are logged in as Administrator.');
-      }
-    } catch {
-      setError('System network error.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchUsers]);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,7 +227,7 @@ export default function UsersPage() {
         {loading ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading user accounts...</div>
         ) : users.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No secondary operator accounts found. Click "Create New User" to add one.</div>
+          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No secondary operator accounts found. Click &quot;Create New User&quot; to add one.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>

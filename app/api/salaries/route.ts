@@ -1,46 +1,97 @@
 import { NextResponse } from 'next/server';
-import { readData, writeData, generateId, getTenantId } from '@/lib/dbHandler';
+import { ADMIN, STAFF, requireFeature, requireSession } from '@/lib/auth';
+import { audit, rupees } from '@/lib/audit';
+import { deleteRecord, findAll, findById, insertRecord } from '@/lib/dbHandler';
+import { jsonError, readBody, toNumber, toText } from '@/lib/http';
+import type { SalaryRecord, StaffMember } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const schoolId = await getTenantId();
+// Accountants can read payroll because the Expense Manager lists salaries alongside expenses.
+// ?month=&year= narrows it to one payroll period (the Salaries page); without them, all history.
+export async function GET(request: Request) {
+  const session = await requireSession(STAFF);
+  if (session instanceof NextResponse) return session;
+
+  const params = new URL(request.url).searchParams;
+  const period: Record<string, string> = {};
+  const month = params.get('month');
+  const year = params.get('year');
+  if (month) period.month = month;
+  if (year) period.year = year;
+
   try {
-    let salaries = await readData<any>('salaries_history.json', schoolId);
-    if (!Array.isArray(salaries)) salaries = [];
-    salaries.sort((a: any, b: any) => new Date(b.paymentDate || 0).getTime() - new Date(a.paymentDate || 0).getTime());
+    const salaries = await findAll<SalaryRecord>('salaries_history', session.schoolId, period);
+    salaries.sort((a, b) => new Date(b.paymentDate || 0).getTime() - new Date(a.paymentDate || 0).getTime());
     return NextResponse.json(salaries);
-  } catch (err: any) {
-    console.error(`Local JSON Salaries GET Error for ${schoolId}:`, err);
-    return NextResponse.json([]);
+  } catch (err) {
+    console.error(`GET salaries failed for ${session.schoolId}:`, err);
+    return jsonError('Failed to load salaries', 500);
   }
 }
 
 export async function POST(request: Request) {
-  const schoolId = await getTenantId();
-  try {
-    const body = await request.json();
-    
-    const salaries = await readData<any>('salaries_history.json', schoolId);
-    const newId = await generateId('salaries_history.json', schoolId);
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'salaries');
+  if (locked) return locked;
+  const { schoolId } = session;
 
-    // Look up staff name so it's permanently stored in the salary record
-    let staffName = body.staffName || '';
-    if (!staffName && body.staffId) {
-      const staffList = await readData<any>('staff.json', schoolId);
-      const staffMember = staffList.find((s: any) => s.id?.toString() === body.staffId?.toString());
-      if (staffMember) staffName = staffMember.name;
+  const body = await readBody(request);
+  const staffId = toText(body?.staffId);
+  if (!body || !staffId) return jsonError('Staff member is required', 400);
+
+  try {
+    const member = await findById<StaffMember>('staff', schoolId, staffId);
+    if (!member) return jsonError('Staff member not found', 404);
+
+    const month = toText(body.month);
+    const year = toText(body.year);
+    if (month && year) {
+      const [alreadyPaid] = await findAll<SalaryRecord>('salaries_history', schoolId, { staffId: member.id, month, year });
+      if (alreadyPaid) return jsonError(`${member.name} has already been paid for ${month} ${year}`, 400);
     }
 
-    const newSalary = { ...body, id: newId, schoolId, staffName };
-    
-    salaries.push(newSalary);
-    await writeData('salaries_history.json', salaries, schoolId);
-
-    return NextResponse.json(newSalary);
-  } catch (err: any) {
-    console.error(`Local JSON Salaries POST Error for ${schoolId}:`, err);
-    return NextResponse.json({ error: 'Failed to record salary' }, { status: 500 });
+    // The name is stored on the record so payroll history survives staff edits.
+    const salary = await insertRecord('salaries_history', schoolId, {
+      staffId: member.id,
+      staffName: member.name,
+      month,
+      year,
+      amount: toNumber(body.amount),
+      offs: toNumber(body.offs),
+      deduction: toNumber(body.deduction),
+      paymentDate: new Date().toISOString(),
+    });
+    const period = month ? ` for ${month} ${year ?? ''}`.trimEnd() : '';
+    await audit(session, 'salary.pay', `Paid ${rupees(salary.amount)} salary to ${member.name}${period}`);
+    return NextResponse.json(salary);
+  } catch (err) {
+    console.error(`POST salary failed for ${schoolId}:`, err);
+    return jsonError('Failed to record salary', 500);
   }
 }
 
+/** Reverses a salary payment. */
+export async function DELETE(request: Request) {
+  const session = await requireSession(ADMIN);
+  if (session instanceof NextResponse) return session;
+  const locked = await requireFeature(session, 'salaries');
+  if (locked) return locked;
+
+  const id = new URL(request.url).searchParams.get('id');
+  if (!id) return jsonError('ID is required', 400);
+
+  try {
+    const salary = await findById<SalaryRecord>('salaries_history', session.schoolId, id);
+    if (!salary || !(await deleteRecord('salaries_history', session.schoolId, salary.id))) {
+      return jsonError('Salary record not found', 404);
+    }
+    const period = salary.month ? ` for ${salary.month} ${salary.year ?? ''}`.trimEnd() : '';
+    await audit(session, 'salary.reverse', `Reversed ${rupees(salary.amount)} salary of ${salary.staffName}${period}`);
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error(`DELETE salary failed for ${session.schoolId}:`, err);
+    return jsonError('Failed to reverse salary', 500);
+  }
+}

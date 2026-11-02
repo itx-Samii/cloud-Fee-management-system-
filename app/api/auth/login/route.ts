@@ -1,124 +1,140 @@
 import { NextResponse } from 'next/server';
-import { readConfig, readData, verifyPassword } from '@/lib/dbHandler';
-import { getDatabase } from '@/lib/mongodb';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
+import { getDb } from '@/lib/db';
+import {
+  LEGACY_SCHOOL_ID,
+  hashPassword,
+  isPlaintextPassword,
+  readConfig,
+  safeEqual,
+  updateConfig,
+  updateRecord,
+  verifyPassword,
+} from '@/lib/dbHandler';
+import type { AppUser } from '@/lib/types';
+import { encodeSession, sessionCookieOptions, SESSION_COOKIE, type Session } from '@/lib/session';
+import { getSession } from '@/lib/auth';
+import { audit } from '@/lib/audit';
+import { jsonError, readBody, toText } from '@/lib/http';
+
+// Failed attempts per IP + username, kept in this server process: enough to stop password guessing.
+const MAX_FAILURES = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const failures = new Map<string, { count: number; first: number }>();
+
+function isLockedOut(key: string): boolean {
+  const entry = failures.get(key);
+  if (!entry) return false;
+  if (Date.now() - entry.first > FAILURE_WINDOW_MS) {
+    failures.delete(key);
+    return false;
+  }
+  return entry.count >= MAX_FAILURES;
+}
+
+function recordFailure(key: string) {
+  const entry = failures.get(key);
+  if (!entry || Date.now() - entry.first > FAILURE_WINDOW_MS) failures.set(key, { count: 1, first: Date.now() });
+  else entry.count++;
+}
+
+type LoginResult = Session | { error: string; status: number } | null;
+
+async function loginSuperAdmin(password: string): Promise<Session | null> {
+  const master = await readConfig('master');
+  let ok: boolean;
+
+  if (master.superAdminPassword) {
+    ok = verifyPassword(password, master.superAdminPassword);
+    if (ok && isPlaintextPassword(master.superAdminPassword)) {
+      await updateConfig('master', { superAdminPassword: hashPassword(password) });
+    }
+  } else {
+    // Until a password has been saved, SUPERADMIN_PASSWORD from the environment is the only way in.
+    const initial = process.env.SUPERADMIN_PASSWORD;
+    ok = !!initial && safeEqual(password, initial);
+    if (ok) await updateConfig('master', { superAdminPassword: hashPassword(password) });
+  }
+
+  return ok ? { username: 'superadmin', role: 'superadmin', displayName: 'Master SaaS Controller', schoolId: 'master' } : null;
+}
+
+async function authenticate(username: string, password: string): Promise<LoginResult> {
+  if (username === 'superadmin') return loginSuperAdmin(password);
+
+  const db = await getDb();
+
+  // School principals live in their school's settings rather than in the users table. (Schools
+  // set up in the single-school days are found by id: school_<username>.)
+  const [school] = await db`
+    select school_id, admin_password, school_name from school_settings
+    where admin_username = ${username} or school_id = ${`school_${username}`}
+    order by admin_username = ${username} desc nulls last
+    limit 1`;
+  if (school) {
+    const stored = school.adminPassword;
+    if (!verifyPassword(password, stored)) return null;
+    if (isPlaintextPassword(stored)) await updateConfig(school.schoolId, { adminPassword: hashPassword(password) });
+    return { username, role: 'admin', displayName: school.schoolName || 'School Principal', schoolId: school.schoolId };
+  }
+
+  // The principal of the original single-school install.
+  if (username === 'admin') {
+    const { adminPassword } = await readConfig(LEGACY_SCHOOL_ID);
+    if (!adminPassword || !verifyPassword(password, adminPassword)) return null;
+    if (isPlaintextPassword(adminPassword)) await updateConfig(LEGACY_SCHOOL_ID, { adminPassword: hashPassword(password) });
+    return { username: 'admin', role: 'admin', displayName: 'Brook Field Principal', schoolId: LEGACY_SCHOOL_ID };
+  }
+
+  // Usernames are unique across schools (the database enforces it), so this finds at most one.
+  const [user] = (await db`select * from users where lower(username) = ${username}`) as unknown as AppUser[];
+  if (!user || !verifyPassword(password, user.password)) return null;
+  if (user.status === 'blocked') return { error: 'Your account has been deactivated by the administrator', status: 403 };
+  const schoolId = user.schoolId ?? LEGACY_SCHOOL_ID;
+  if (isPlaintextPassword(user.password)) await updateRecord('users', schoolId, user.id, { password: hashPassword(password) });
+
+  return {
+    username: user.username,
+    // Never trust a stored role beyond what a school can grant.
+    role: user.role === 'admin' ? 'admin' : 'accountant',
+    displayName: user.displayName || user.username,
+    schoolId,
+  };
+}
 
 export async function POST(request: Request) {
+  const body = await readBody(request);
+  const username = toText(body?.username)?.toLowerCase();
+  const password = toText(body?.password);
+  if (!username || !password) return jsonError('Username and password are required', 400);
+
+  const ip = (await headers()).get('x-forwarded-for')?.split(',')[0].trim() || 'local';
+  const attemptKey = `${ip}:${username}`;
+  if (isLockedOut(attemptKey)) return jsonError('Too many failed attempts. Please wait 15 minutes and try again.', 429);
+
   try {
-    const { username, password } = await request.json();
-    const trimmedUsername = username?.trim()?.toLowerCase();
-    const trimmedPassword = password?.trim();
-
-    if (!trimmedUsername || !trimmedPassword) {
-      return NextResponse.json({ error: 'Username and password are required' }, { status: 400 });
+    const result = await authenticate(username, password);
+    if (!result) {
+      recordFailure(attemptKey);
+      return jsonError('Incorrect username or password', 401);
     }
+    if ('error' in result) return jsonError(result.error, result.status);
 
-    const config = await readConfig();
-    const masterConfig = await readConfig('master');
-
-    // 1. Check Super Admin (Developer / System Owner)
-    if (trimmedUsername === 'superadmin') {
-      if (verifyPassword(trimmedPassword, masterConfig.superAdminPassword || config.superAdminPassword || config.adminPassword)) {
-        const cookieStore = await cookies();
-        const payload = JSON.stringify({ username: 'superadmin', role: 'superadmin', displayName: 'Master SaaS Controller', schoolId: 'master' });
-        cookieStore.set('school-session', payload, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax'
-        });
-        return NextResponse.json({ success: true, user: { username: 'superadmin', role: 'superadmin', displayName: 'Master SaaS Controller', schoolId: 'master' } });
-      } else {
-        return NextResponse.json({ error: 'Incorrect Password' }, { status: 401 });
-      }
+    failures.delete(attemptKey);
+    (await cookies()).set(SESSION_COOKIE, encodeSession(result), sessionCookieOptions);
+    if (result.role !== 'superadmin') {
+      const local = ['local', '::1', '127.0.0.1', '::ffff:127.0.0.1'].includes(ip);
+      await audit(result, 'login', local ? 'Signed in on the server computer' : `Signed in from ${ip}`);
     }
-
-    const db = await getDatabase();
-
-    // 2. Check Client/School Admin (Principal) against SaaS configs
-    const clientSchool = await db.collection('config').findOne({
-      $or: [
-        { 'value.adminUsername': trimmedUsername },
-        { key: `app_settings_school_${trimmedUsername}` }
-      ]
-    });
-
-    if (clientSchool && clientSchool.value) {
-      if (verifyPassword(trimmedPassword, clientSchool.value.adminPassword)) {
-        const schoolId = clientSchool.schoolId || 'school_brookfield';
-        const schoolName = clientSchool.value.schoolName || 'School Principal';
-        const cookieStore = await cookies();
-        const payload = JSON.stringify({ username: trimmedUsername, role: 'admin', displayName: schoolName, schoolId });
-        cookieStore.set('school-session', payload, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax'
-        });
-        return NextResponse.json({ success: true, user: { username: trimmedUsername, role: 'admin', displayName: schoolName, schoolId } });
-      } else {
-        return NextResponse.json({ error: 'Incorrect Password' }, { status: 401 });
-      }
-    }
-
-    // Default legacy admin check
-    if (trimmedUsername === 'admin') {
-      if (verifyPassword(trimmedPassword, config.adminPassword)) {
-        const cookieStore = await cookies();
-        const payload = JSON.stringify({ username: 'admin', role: 'admin', displayName: 'Brook Field Principal', schoolId: 'school_brookfield' });
-        cookieStore.set('school-session', payload, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax'
-        });
-        return NextResponse.json({ success: true, user: { username: 'admin', role: 'admin', displayName: 'Brook Field Principal', schoolId: 'school_brookfield' } });
-      } else {
-        return NextResponse.json({ error: 'Incorrect Password' }, { status: 401 });
-      }
-    }
-
-    // 3. Check Accountant from MongoDB users collection
-    const users = await db.collection('users').find({}).toArray();
-    const user = users.find((u: any) => u.username?.toLowerCase() === trimmedUsername);
-
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (user.status === 'blocked') {
-      return NextResponse.json({ error: 'Your account has been deactivated by the administrator' }, { status: 403 });
-    }
-
-    if (verifyPassword(trimmedPassword, user.password)) {
-      const activeSchoolId = user.schoolId || 'school_brookfield';
-      const cookieStore = await cookies();
-      const payload = JSON.stringify({ username: user.username, role: user.role, displayName: user.displayName, schoolId: activeSchoolId });
-      cookieStore.set('school-session', payload, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax'
-      });
-      return NextResponse.json({ success: true, user: { username: user.username, role: user.role, displayName: user.displayName, schoolId: activeSchoolId } });
-    } else {
-      return NextResponse.json({ error: 'Incorrect Password' }, { status: 401 });
-    }
+    return NextResponse.json({ success: true, user: result });
   } catch (err) {
-    console.error('Auth error:', err);
-    return NextResponse.json({ error: 'Authentication failed' }, { status: 500 });
+    console.error('Login failed:', err);
+    return jsonError('Login failed. Please try again.', 500);
   }
 }
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('school-session');
-  if (!session?.value) {
-    return NextResponse.json({ authenticated: false }, { status: 401 });
-  }
-  try {
-    const userData = JSON.parse(session.value);
-    return NextResponse.json({ authenticated: true, user: userData });
-  } catch (e) {
-    if (session.value === 'authenticated') {
-      return NextResponse.json({ authenticated: true, user: { username: 'admin', role: 'admin', displayName: 'School Administrator' } });
-    }
-    return NextResponse.json({ authenticated: false }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ authenticated: false }, { status: 401 });
+  return NextResponse.json({ authenticated: true, user: session });
 }

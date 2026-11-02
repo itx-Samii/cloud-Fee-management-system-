@@ -1,5 +1,6 @@
 "use client";
 import React, { useState } from 'react';
+import { reloadTo } from '@/lib/reloadTo';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -23,9 +24,7 @@ export default function LoginPage() {
 
       if (res.ok && data.success) {
         const r = data.user?.role;
-        if (r === 'superadmin') window.location.href = '/superadmin';
-        else if (r === 'accountant') window.location.href = '/collection';
-        else window.location.href = '/'; 
+        reloadTo(r === 'superadmin' ? '/superadmin' : r === 'accountant' ? '/collection' : '/');
       } else {
         setError(data.error || 'Invalid credentials! Please try again.');
       }

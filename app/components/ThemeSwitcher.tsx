@@ -1,8 +1,10 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useStoredSetting } from '@/lib/useStoredSetting';
 
 export default function ThemeSwitcher() {
-  const [theme, setTheme] = useState("light");
+  // layout.tsx applies the saved theme before first paint; this keeps the picker in step with it.
+  const [theme, saveTheme] = useStoredSetting('school-theme', 'light');
 
   const themes = [
     { id: 'light', name: 'Light Mode', icon: '☀️' },
@@ -12,28 +14,20 @@ export default function ThemeSwitcher() {
     { id: 'sunset', name: 'Warm Sunset', icon: '🌇' }
   ];
 
-  useEffect(() => {
-    // Load saved theme on mount
-    const saved = localStorage.getItem('school-theme') || 'light';
-    setTheme(saved);
-    document.documentElement.setAttribute('data-theme', saved);
-  }, []);
-
   const changeTheme = (newTheme: string) => {
-    setTheme(newTheme);
-    localStorage.setItem('school-theme', newTheme);
+    saveTheme(newTheme);
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
   return (
     <div className="theme-switcher-box">
       <p style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600}}>SYSTEM THEME</p>
-      <select 
+      <select
         value={theme}
         onChange={(e) => changeTheme(e.target.value)}
         style={{
-          width: '100%', 
-          padding: '0.6rem', 
+          width: '100%',
+          padding: '0.6rem',
           borderRadius: '8px',
           background: 'var(--bg-card)',
           color: 'var(--text-main)',

@@ -1,9 +1,34 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import type { Expense, RecordId, SalaryRecord } from '@/lib/types';
+import { yearOptions } from '@/lib/fees';
+
+/** A row in the spending table: a manual expense or a salary payment. */
+interface SpendingItem {
+  id: RecordId;
+  date: string;
+  category?: string;
+  description?: string;
+  amount: number;
+  type: 'manual' | 'auto';
+}
+
+async function fetchSpending(): Promise<{ expenses: Expense[]; salaries: SalaryRecord[] }> {
+  const [expRes, salRes] = await Promise.all([
+    fetch('/api/expenses'),
+    fetch('/api/salaries')
+  ]);
+  const expData = await expRes.json();
+  const salData = await salRes.json();
+  return {
+    expenses: Array.isArray(expData) ? expData : [],
+    salaries: Array.isArray(salData) ? salData : [],
+  };
+}
 
 export default function ExpenseManager() {
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [salaries, setSalaries] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [salaries, setSalaries] = useState<SalaryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({ category: 'Salary', amount: '', description: '' });
   
@@ -15,27 +40,21 @@ export default function ExpenseManager() {
   const currentMonthNum = now.getMonth();
   const currentYearNum = now.getFullYear();
 
-  const fetchExpenses = async () => {
-    setLoading(true);
-    try {
-      const [expRes, salRes] = await Promise.all([
-        fetch('/api/expenses'),
-        fetch('/api/salaries')
-      ]);
-      const expData = await expRes.json();
-      const salData = await salRes.json();
-      setExpenses(Array.isArray(expData) ? expData : []);
-      setSalaries(Array.isArray(salData) ? salData : []);
-    } catch (e) {
-      console.error("Failed to fetch spending data", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchExpenses = useCallback(
+    () =>
+      fetchSpending()
+        .then((data) => {
+          setExpenses(data.expenses);
+          setSalaries(data.salaries);
+        })
+        .catch((e) => console.error("Failed to fetch spending data", e))
+        .finally(() => setLoading(false)),
+    []
+  );
 
   useEffect(() => {
     fetchExpenses();
-  }, []);
+  }, [fetchExpenses]);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +68,7 @@ export default function ExpenseManager() {
     fetchExpenses();
   };
 
-  const handleDelete = async (id: any) => {
+  const handleDelete = async (id: RecordId) => {
     if (!confirm("Are you sure you want to delete this expense record?")) return;
     setLoading(true);
     try {
@@ -58,22 +77,22 @@ export default function ExpenseManager() {
       });
       if (!res.ok) throw new Error("Delete failed");
       await fetchExpenses();
-    } catch (err) {
+    } catch {
       alert("Failed to delete the record. Please try again.");
       setLoading(false);
     }
   };
 
-  const allSpendingItems = [
+  const allSpendingItems: SpendingItem[] = [
     // Include manual expenses BUT ignore those with category 'Salary' to avoid table duplicates
-    ...expenses.filter(e => e.category?.toLowerCase() !== 'salary').map(e => ({ ...e, type: 'manual', date: e.date || new Date().toISOString() })),
-    ...salaries.map(s => ({ 
-      id: `sal-${s.id}`, 
-      date: s.paymentDate || s.date || new Date().toISOString(), 
-      category: '💰 Salary (Auto)', 
+    ...expenses.filter(e => e.category?.toLowerCase() !== 'salary').map(e => ({ ...e, type: 'manual' as const, date: e.date || new Date().toISOString() })),
+    ...salaries.map(s => ({
+      id: `sal-${s.id}`,
+      date: s.paymentDate || s.date || new Date().toISOString(),
+      category: '💰 Salary (Auto)',
       description: `Payroll: ${s.staffName} (${s.month})`, 
       amount: s.amount,
-      type: 'auto' 
+      type: 'auto' as const
     }))
   ];
 
@@ -84,20 +103,20 @@ export default function ExpenseManager() {
     return mMatch && yMatch;
   });
 
-  const displayItems = filteredItems.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const displayItems = filteredItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
   // Calculate total: Sum of currently filtered items
-  const filteredTotal = filteredItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+  const filteredTotal = filteredItems.reduce((acc, curr) => acc + (parseFloat(String(curr.amount)) || 0), 0);
   
   // By default (when no filters), show current month's total for the "Monthly Spending" box
   const currentMonthTotal = allSpendingItems.filter(e => {
     const d = new Date(e.date || new Date());
     return d.getMonth() === currentMonthNum && d.getFullYear() === currentYearNum;
-  }).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+  }).reduce((acc, curr) => acc + (parseFloat(String(curr.amount)) || 0), 0);
 
   const displayTotal = (monthFilter === 'all' && yearFilter === 'all') ? currentMonthTotal : filteredTotal;
 
-  const totalExpense = allSpendingItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+  const totalExpense = allSpendingItems.reduce((acc, curr) => acc + (parseFloat(String(curr.amount)) || 0), 0);
 
   const categories = ['Salary', 'Electricity Bill', 'Internet', 'Maintenance & Repairs', 'Stationery', 'Petrol/Fuel', 'Other'];
 
@@ -164,7 +183,7 @@ export default function ExpenseManager() {
                    <label className="form-label" style={{fontSize: '0.75rem', marginBottom: '0.5rem'}}>AUDIT YEAR</label>
                    <select className="form-input" style={{padding: '0.5rem 0.8rem'}} value={yearFilter} onChange={e => setYearFilter(e.target.value)}>
                      <option value="all">All Records</option>
-                     {["2025", "2026", "2027"].map(y => <option key={y} value={y}>{y}</option>)}
+                     {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
                    </select>
                 </div>
                 {(monthFilter !== 'all' || yearFilter !== 'all') && (
@@ -196,7 +215,7 @@ export default function ExpenseManager() {
                 ) : displayItems.length === 0 ? (
                   <tr><td colSpan={5} style={{textAlign: 'center', padding: '2rem', color: 'var(--text-muted)'}}>No expenses match your filters.</td></tr>
                 ) : (
-                  displayItems.map((e: any, idx: number) => (
+                  displayItems.map((e, idx) => (
                     <tr key={`exp_${e.id}_${idx}`} style={{background: e.type === 'auto' ? 'rgba(79, 70, 229, 0.05)' : 'transparent'}}>
                       <td style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>{new Date(e.date || new Date()).toLocaleDateString('en-GB')}</td>
                       <td><span className={`badge ${e.type === 'auto' ? 'badge-success' : 'badge-neutral'}`}>{e.category}</span></td>

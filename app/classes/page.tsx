@@ -1,36 +1,40 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import type { RecordId, SchoolClass } from '@/lib/types';
+
+type ClassRow = SchoolClass & { studentCount?: number };
+
+async function fetchClassList(): Promise<ClassRow[]> {
+  const res = await fetch('/api/classes?_t=' + Date.now(), {
+    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+  });
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
 
 export default function ClassesHub() {
-  const [classes, setClasses] = useState<any[]>([]);
+  const [classes, setClasses] = useState<ClassRow[]>([]);
   const [showClassModal, setShowClassModal] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<RecordId | null>(null);
   const [classForm, setClassForm] = useState({ name: '', section: '' });
 
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch('/api/classes?_t=' + Date.now(), {
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-      });
-      const data = await res.json();
-      setClasses(data || []);
-    } catch {
-      console.error("Failed to fetch classes");
-    }
-  };
+  const fetchClasses = useCallback(
+    () => fetchClassList().then(setClasses).catch(() => console.error("Failed to fetch classes")),
+    []
+  );
 
   useEffect(() => {
     fetchClasses();
-  }, []);
+  }, [fetchClasses]);
 
-  const handleEditClick = (c: any) => {
+  const handleEditClick = (c: ClassRow) => {
     setEditingId(c.id);
     setClassForm({ name: c.name, section: c.section || '' });
     setShowClassModal(true);
   };
 
-  const handleDeleteClass = async (id: number) => {
+  const handleDeleteClass = async (id: RecordId) => {
     if (!confirm("Are you sure you want to delete this class? All references will fallback to raw IDs.")) return;
     const res = await fetch(`/api/classes?id=${id}`, { method: 'DELETE' });
     if (res.ok) fetchClasses();
@@ -62,7 +66,7 @@ export default function ClassesHub() {
                 <button className="btn btn-secondary" style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem'}} onClick={() => handleEditClick(c)}>Edit</button>
               </div>
               <div style={{color: 'var(--text-muted)', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem'}}>
-                <span>Created: {new Date(c.createdAt).toLocaleDateString()}</span>
+                <span>Created: {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}</span>
                 <span style={{color: 'var(--text-main)', fontWeight: 600}}>Total Students: {c.studentCount || 0}</span>
               </div>
               <div style={{display: 'flex', gap: '0.5rem', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)'}}>

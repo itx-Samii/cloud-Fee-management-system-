@@ -1,50 +1,57 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { exportToCSV } from '@/lib/exportUtils';
+import type { SchoolClass, Student } from '@/lib/types';
+import { yearOptions } from '@/lib/fees';
+
+async function fetchLedgerData(): Promise<{ students: Student[]; classes: SchoolClass[] }> {
+  const [sRes, cRes] = await Promise.all([
+    fetch('/api/students?limit=1000', { cache: 'no-store' }),
+    fetch('/api/classes', { cache: 'no-store' })
+  ]);
+  const sData = await sRes.json();
+  const cData = await cRes.json();
+  return { students: sData.students || [], classes: Array.isArray(cData) ? cData : [] };
+}
 
 export default function ACLedger() {
-  const [students, setStudents] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
   const [selectedYear, setSelectedYear] = useState('2026');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [thisYear] = useState(() => new Date().getFullYear().toString());
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [processing, setProcessing] = useState(false);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [sRes, cRes] = await Promise.all([
-        fetch('/api/students?limit=1000', { cache: 'no-store' }),
-        fetch('/api/classes', { cache: 'no-store' })
-      ]);
-      const sData = await sRes.json();
-      const cData = await cRes.json();
-      setStudents(sData.students || []);
-      setClasses(cData || []);
-    } catch {
-      console.error("Failed to fetch data");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchData = useCallback(
+    () =>
+      fetchLedgerData()
+        .then((data) => {
+          setStudents(data.students);
+          setClasses(data.classes);
+        })
+        .catch(() => console.error("Failed to fetch data"))
+        .finally(() => setLoading(false)),
+    []
+  );
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const filtered = students.filter(s => {
     const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || s.fatherName?.toLowerCase().includes(search.toLowerCase());
     const matchesClass = selectedClass === 'all' || s.classId?.toString() === selectedClass;
-    
+
     // For now, match against updatedAt year as a proxy for the 'Session'
-    const sessionYear = new Date(s.updatedAt || Date.now()).getFullYear().toString();
+    const sessionYear = s.updatedAt ? new Date(s.updatedAt).getFullYear().toString() : thisYear;
     const matchesYear = selectedYear === 'all' || sessionYear === selectedYear;
 
     const total = s.annualCharges || 0;
@@ -142,9 +149,7 @@ export default function ACLedger() {
           <label className="form-label">Year</label>
           <select className="form-input" value={selectedYear} onChange={e => setSelectedYear(e.target.value)}>
             <option value="all">All</option>
-            <option value="2025">2025</option>
-            <option value="2026">2026</option>
-            <option value="2027">2027</option>
+            {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div style={{flex: 1, minWidth: '150px'}}>
@@ -162,17 +167,17 @@ export default function ACLedger() {
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Total AC Goal</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(s.annualCharges) || 0), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(String(s.annualCharges)) || 0), 0).toLocaleString()}</h2>
         </div>
         
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--success)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Total Collected AC</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--success)'}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(s.paidAnnualCharges) || 0), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--success)'}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(String(s.paidAnnualCharges)) || 0), 0).toLocaleString()}</h2>
         </div>
 
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--danger)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Outstanding AC</span>
-          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--danger)'}}>Rs. {filtered.reduce((sum, s) => sum + ((parseFloat(s.annualCharges) || 0) - (parseFloat(s.paidAnnualCharges) || 0)), 0).toLocaleString()}</h2>
+          <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0, color: 'var(--danger)'}}>Rs. {filtered.reduce((sum, s) => sum + ((parseFloat(String(s.annualCharges)) || 0) - (parseFloat(String(s.paidAnnualCharges)) || 0)), 0).toLocaleString()}</h2>
         </div>
       </div>
 
@@ -250,7 +255,7 @@ export default function ACLedger() {
               </div>
               <div style={{display: 'flex', justifyContent: 'space-between', color: 'var(--danger)'}}>
                 <span>Remaining Balance:</span>
-                <span style={{fontWeight: 700}}>Rs. {selectedStudent.annualCharges - selectedStudent.paidAnnualCharges}</span>
+                <span style={{fontWeight: 700}}>Rs. {(selectedStudent.annualCharges || 0) - (selectedStudent.paidAnnualCharges || 0)}</span>
               </div>
             </div>
 
