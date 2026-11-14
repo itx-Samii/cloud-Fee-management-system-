@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { getDb } from '@/lib/db';
-import { LEGACY_SCHOOL_ID, toDbRow, type CollectionName } from '@/lib/dbHandler';
+import { LEGACY_SCHOOL_ID, readConfig, toDbRow, type CollectionName } from '@/lib/dbHandler';
+import { staffSessionRevision } from '@/lib/staffSessions';
 import { encodeSession, SESSION_COOKIE, type Role, type Session } from '@/lib/session';
 
 export const SCHOOL = LEGACY_SCHOOL_ID;
@@ -15,8 +17,9 @@ export const cookieStore = {
   delete: (name: string) => void jar.delete(name),
 };
 
-export function signInAs(role: Role, schoolId = SCHOOL, username = role === 'accountant' ? 'cashier1' : 'admin'): Session {
-  const session: Session = { username, role, displayName: `Test ${role}`, schoolId };
+export async function signInAs(role: Role, schoolId = SCHOOL, username = role === 'accountant' ? 'cashier1' : 'admin'): Promise<Session> {
+  await readConfig(schoolId);
+  const session: Session = { username, role, displayName: `Test ${role}`, schoolId, revision: await staffSessionRevision(username) };
   jar.set(SESSION_COOKIE, encodeSession(session));
   return session;
 }
@@ -45,6 +48,9 @@ type Handler = (request: Request) => Promise<Response>;
 /** Calls a route handler the way Next.js would and returns the status and parsed JSON. */
 export async function call(handler: Handler, method: string, path: string, body?: unknown) {
   const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+  if (method === 'PUT' && path === '/api/fees' && body && typeof body === 'object') {
+    body = { requestId: randomUUID(), ...body };
+  }
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await handler(new Request(`http://localhost${path}`, init));
   const data: any = await res.json().catch(() => null);

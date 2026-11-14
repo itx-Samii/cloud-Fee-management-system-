@@ -19,7 +19,7 @@ const EMPTY_FORM = { name: '', fatherName: '', parentPhone: '', admissionNumber:
 
 /** A ready-to-fill spreadsheet with the columns the import understands. */
 function downloadTemplate() {
-  const csv = toCsv([TEMPLATE_HEADINGS, ['Ali Khan', 'Imran Khan', '2026-001', '5th', 'A', '3000', '0', '5000']]);
+  const csv = toCsv([TEMPLATE_HEADINGS, ['Ali Khan', 'Imran Khan', '', '', '5th', 'A', '3000', '0', '5000']]);
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   link.download = 'students_template.csv';
@@ -43,6 +43,7 @@ export default function StudentsDirectory() {
   const [loading, setLoading] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
+  const [editVersion, setEditVersion] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<RecordId | null>(null);
   const [selectedClassId, setSelectedClassId] = useState('all');
   const [classes, setClasses] = useState<SchoolClass[]>([]);
@@ -88,7 +89,6 @@ export default function StudentsDirectory() {
       name: formData.name,
       fatherName: formData.fatherName,
       parentPhone: formData.parentPhone,
-      admissionNumber: formData.admissionNumber,
       classId: formData.classId,
       monthlyFee: parseFloat(formData.monthlyFee || '0'),
       discount: parseFloat(formData.discount || '0'),
@@ -97,7 +97,7 @@ export default function StudentsDirectory() {
       annualCharges: parseFloat(formData.annualCharges || '0'),
       paidAnnualCharges: editingId ? undefined : 0, // only init for new
       status: formData.status,
-      ...(editingId ? { id: editingId } : {})
+      ...(editingId ? { id: editingId, expectedUpdatedAt: editVersion } : {})
     };
 
     const res = await fetch('/api/students', {
@@ -119,6 +119,7 @@ export default function StudentsDirectory() {
 
   const handleEditClick = (student: StudentRow) => {
     setEditingId(student.id);
+    setEditVersion(student.updatedAt ?? null);
     setFormData({
       name: student.name || '',
       fatherName: student.fatherName || '',
@@ -179,12 +180,12 @@ export default function StudentsDirectory() {
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+      <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
         <div>
           <h1>Global Student Directory</h1>
           <p>Showing {students.length} of {totalRecords} total records across all classes</p>
         </div>
-        <div style={{display: 'flex', gap: '1rem'}}>
+        <div className="workspace-actions">
           <button
             className="btn btn-secondary"
             onClick={() => exportToCSV(students, 'All_Students', {
@@ -215,7 +216,7 @@ export default function StudentsDirectory() {
         </div>
       </div>
 
-      <div className="glass-panel" style={{padding: '1.5rem', marginBottom: '2rem', display: 'flex', gap: '1rem'}}>
+      <div className="glass-panel workspace-student-filters">
         <input
           type="text"
           className="form-input"
@@ -253,6 +254,7 @@ export default function StudentsDirectory() {
             <tr>
               <th style={{width: '80px'}}>Sr No</th>
               <th>Adm No</th>
+              <th>Roll No</th>
               <th>Student & Father Name</th>
               <th>Class</th>
               <th>Base Fee</th>
@@ -263,14 +265,15 @@ export default function StudentsDirectory() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{padding: '3rem', textAlign: 'center'}}>Loading data...</td></tr>
+              <tr><td colSpan={9} style={{padding: '3rem', textAlign: 'center'}}>Loading data...</td></tr>
             ) : students.length === 0 ? (
-              <tr><td colSpan={8} style={{padding: '3rem', textAlign: 'center'}}>No students found.</td></tr>
+              <tr><td colSpan={9} style={{padding: '3rem', textAlign: 'center'}}>No students found.</td></tr>
             ) : (
               students.map((s, idx) => (
                 <tr key={s.id}>
                   <td style={{color: 'var(--text-muted)'}}>#{(page - 1) * 20 + idx + 1}</td>
                   <td style={{fontWeight: 700}}>{s.admissionNumber || 'N/A'}</td>
+                  <td>{s.rollNumber ?? '-'}</td>
                   <td>
                     <div style={{fontWeight: 600}}>{s.name}</div>
                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>S/O: {s.fatherName || 'N/A'}{s.parentPhone ? ` · ${s.parentPhone}` : ''}</div>
@@ -307,14 +310,14 @@ export default function StudentsDirectory() {
       )}
 
       {showModal && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '500px', padding: '2rem', maxHeight: '92vh', overflowY: 'auto'}}>
             <h2 style={{marginBottom: '1.5rem'}}>{editingId ? 'Modify Student Record' : 'Register Student'}</h2>
             <form onSubmit={handleSaveStudent}>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem'}}>
                 <div className="form-group">
                   <label className="form-label">Admission Number</label>
-                  <input className="form-input" placeholder="e.g. 2024-001" value={formData.admissionNumber} onChange={e => setFormData({...formData, admissionNumber: e.target.value})} />
+                  <input className="form-input" value={formData.admissionNumber || "Assigned on save"} readOnly />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Full Name</label>
@@ -378,7 +381,7 @@ export default function StudentsDirectory() {
       )}
 
       {importProblems && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '560px', padding: '2rem', maxHeight: '80vh', overflowY: 'auto'}}>
             <h2 style={{marginBottom: '0.5rem'}}>Nothing was imported</h2>
             <p style={{marginBottom: '1.25rem'}}>Fix these rows in the file and import it again. Row numbers match the spreadsheet.</p>

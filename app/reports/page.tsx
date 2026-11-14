@@ -75,7 +75,7 @@ export default function CollectionReports() {
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+      <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
         <div>
           <h1>Financial Overview</h1>
           <p>School fee collection flow and generated income statements.</p>
@@ -156,7 +156,7 @@ export default function CollectionReports() {
         </div>
       </div>
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '3rem'}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem', marginBottom: '3rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em'}}>Billed Revenue</span>
           <h2 style={{fontSize: '2rem', fontWeight: 800}}>Rs. {totalBilled}</h2>

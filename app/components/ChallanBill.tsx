@@ -26,12 +26,12 @@ export function numberToWords(num: number): string {
 }
 
 /** The amounts block of a printed challan: particulars, totals, amount in words and due date. */
-export default function ChallanBill({ voucher: f, settings }: { voucher: ChallanVoucher; settings: FeeSettings }) {
+export default function ChallanBill({ voucher: f, settings, savedDueDateOnly = false }: { voucher: ChallanVoucher; settings: FeeSettings; savedDueDateOnly?: boolean }) {
   const fine = n(f.lateFine);
   const paid = n(f.paidTuition);
   const total = f.balanceDue ?? Math.max(0, n(f.amount) + fine - paid) + n(f.previousArrears) + n(f.remainingAnnualCharges);
   // Not overdue yet: show what it becomes after the due date.
-  const afterDue = fine === 0 && !f.fineWaived && settings.lateFine > 0 && n(f.amount) > paid ? total + settings.lateFine : null;
+  const afterDue = (!savedDueDateOnly || Boolean(f.dueDate)) && fine === 0 && !f.fineWaived && settings.lateFine > 0 && n(f.amount) > paid ? total + settings.lateFine : null;
   // Vouchers from before due dates were saved: due a set number of days from printing, as before.
   const dueDate = f.dueDate ? new Date(f.dueDate) : new Date();
   if (!f.dueDate) dueDate.setDate(dueDate.getDate() + settings.dueDays);
@@ -69,9 +69,9 @@ export default function ChallanBill({ voucher: f, settings }: { voucher: Challan
         <div style={{textTransform: 'uppercase', marginTop: '1mm', borderBottom: '0.5px solid #ccc', paddingBottom: '1mm'}}>{numberToWords(total)}</div>
       </div>
 
-      <div style={{fontSize: '11pt', fontWeight: 900, margin: '3mm 0'}}>
+      {(!savedDueDateOnly || f.dueDate) && <div style={{fontSize: '11pt', fontWeight: 900, margin: '3mm 0'}}>
         Due Date: {dueDate.toLocaleDateString('en-GB')}
-      </div>
+      </div>}
     </>
   );
 }

@@ -3,7 +3,12 @@ import { LEGACY_SCHOOL_ID } from './dbHandler';
 import { DEFAULT_FEATURES, FEATURE_KEYS, type Features } from './features';
 
 export { DEFAULT_FEATURES, type Features };
-export type LicenseStatus = 'active' | 'blocked';
+export type LicenseStatus = 'active' | 'blocked' | 'expired';
+
+export function licenseStatus(status: unknown, trialExpiresAt?: string): LicenseStatus {
+  if (status === 'blocked') return 'blocked';
+  return trialExpiresAt && Date.parse(trialExpiresAt) <= Date.now() ? 'expired' : 'active';
+}
 
 /** A license's stored features with every known key filled in (new features start on). */
 export function featuresOf(stored: unknown): Features {
@@ -18,6 +23,7 @@ export interface LicenseInfo {
   maxStudents: number;
   features: Features;
   lastChecked: string;
+  trialExpiresAt?: string;
 }
 
 export const DEFAULT_MAX_STUDENTS = 1000;
@@ -36,7 +42,8 @@ export async function getLicense(schoolId: string): Promise<LicenseInfo> {
   const [license] = await db`select * from licenses where school_id = ${schoolId}`;
   if (license) {
     return {
-      status: license.status === 'blocked' ? 'blocked' : 'active',
+      status: licenseStatus(license.status, license.trialExpiresAt),
+      trialExpiresAt: license.trialExpiresAt,
       clientName: license.clientName || 'School System',
       key: license.licenseKey,
       maxStudents: license.maxStudents || DEFAULT_MAX_STUDENTS,
@@ -55,23 +62,24 @@ export async function getLicense(schoolId: string): Promise<LicenseInfo> {
   };
 }
 
-// Every API call checks the license, so remember each school's status and features briefly.
-// Changes from the Super Admin page take effect at once (forgetLicenseStatus); anything else
-// within STATUS_TTL_MS.
+// Feature flags can be cached briefly. Access checks read the current deadline each time.
 const STATUS_TTL_MS = 30_000;
-const statusCache = new Map<string, { status: LicenseStatus; features: Features; at: number }>();
+const statusCache = new Map<string, { features: Features; at: number }>();
 
 async function cachedLicense(schoolId: string) {
   const cached = statusCache.get(schoolId);
   if (cached && Date.now() - cached.at < STATUS_TTL_MS) return cached;
-  const { status, features } = await getLicense(schoolId);
-  const entry = { status, features, at: Date.now() };
+  const { features } = await getLicense(schoolId);
+  const entry = { features, at: Date.now() };
   statusCache.set(schoolId, entry);
   return entry;
 }
 
 export async function getLicenseStatus(schoolId: string): Promise<LicenseStatus> {
-  return (await cachedLicense(schoolId)).status;
+  if (schoolId === 'master') return 'active';
+  const db = await getDb();
+  const [license] = await db`select status, trial_expires_at from licenses where school_id = ${schoolId}`;
+  return licenseStatus(license?.status, license?.trialExpiresAt);
 }
 
 /** Which features the Super Admin has left on for this school. */

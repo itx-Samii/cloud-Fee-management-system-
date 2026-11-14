@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireFeature, requireSession } from '@/lib/auth';
 import { audit } from '@/lib/audit';
+import { isUniqueViolation } from '@/lib/db';
 import {
   MIN_PASSWORD_LENGTH,
   USERNAME_PATTERN,
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
     await audit(session, 'user.add', `Created accountant login "${username}" (${displayName})`);
     return NextResponse.json({ success: true, user: publicUser(user as AppUser) });
   } catch (err) {
+    if (isUniqueViolation(err)) return jsonError(`Username "${username}" is already taken`, 400);
     console.error(`POST user failed for ${schoolId}:`, err);
     return jsonError('Failed to create user', 500);
   }

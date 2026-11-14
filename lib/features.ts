@@ -15,12 +15,15 @@ export type FeatureKey =
   | 'salaries'
   | 'classes'
   | 'students'
+  | 'promotion'
   | 'users'
   | 'activity'
   | 'charges'
   | 'advance'
   | 'lateFine'
   | 'whatsapp'
+  | 'reminders'
+  | 'parentPortal'
   | 'importStudents';
 
 export type Features = Record<FeatureKey, boolean>;
@@ -49,12 +52,15 @@ export const FEATURES: Record<FeatureKey, FeatureInfo> = {
   salaries: { label: 'Salaries Manager', icon: '💵', group: 'Modules', description: 'Staff, monthly salaries and salary slips', pages: ['/salaries'] },
   classes: { label: 'Classes Management', icon: '🏫', group: 'Modules', description: 'Classes, sections and their fees', pages: ['/classes'] },
   students: { label: 'All Students', icon: '🎓', group: 'Modules', description: 'Student directory, admissions and students who left', pages: ['/students'] },
+  promotion: { label: 'Class Promotion', icon: '⬆️', group: 'Modules', description: 'Moving students up to their next class for the new session', needs: 'students', pages: ['/promotion'] },
   users: { label: 'Users & Roles', icon: '🛡️', group: 'Modules', description: 'Accountant logins', pages: ['/users'] },
   activity: { label: 'Activity Log', icon: '🕵️', group: 'Modules', description: 'Who did what and when (always recorded; this only hides the page)', pages: ['/activity'] },
   charges: { label: 'Extra Charges', icon: '➕', group: 'Fee options', description: 'Admission, exam, transport and other charges on top of the monthly fee' },
   advance: { label: 'Advance Fee', icon: '⏩', group: 'Fee options', description: 'Taking fees for the coming months in advance', needs: 'collection' },
   lateFine: { label: 'Late Fine', icon: '⏳', group: 'Fee options', description: 'A fine on vouchers paid after their due date' },
   whatsapp: { label: 'WhatsApp Messages', icon: '💬', group: 'Tools', description: 'Fee reminders and receipts to parents on WhatsApp' },
+  reminders: { label: 'Bulk Reminders', icon: '📣', group: 'Tools', description: 'WhatsApp fee reminders to every defaulter family, one after another', needs: 'whatsapp' },
+  parentPortal: { label: 'Parent Portal', icon: '👪', group: 'Tools', description: "Parents sign in with their phone number and a PIN to see their children's fees, vouchers and receipts" },
   importStudents: { label: 'Import from Excel', icon: '📥', group: 'Tools', description: 'Adding many students at once from a CSV file', needs: 'students' },
 };
 

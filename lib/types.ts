@@ -14,6 +14,7 @@ export interface Student extends BaseRecord {
   /** For fee reminders on WhatsApp; brothers and sisters share it, which links a family. */
   parentPhone?: string;
   admissionNumber?: string;
+  rollNumber?: number;
   classId?: string;
   monthlyFee?: number;
   discount?: number;
@@ -143,6 +144,8 @@ export interface SchoolConfig {
 
 /** One cash receipt; its id is the receipt number. Reversed receipts stay on file, marked. */
 export interface Payment extends BaseRecord {
+  requestId?: string;
+  requestFingerprint?: string;
   voucherId: RecordId;
   studentId?: RecordId;
   studentName?: string;
@@ -217,4 +220,6 @@ export interface Defaulter {
   annualCharges: number;
   total: number;
   lastPayment: string | null;
+  /** The latest WhatsApp reminder about this student in the last 90 days. */
+  lastReminder: { at: string; by: string } | null;
 }

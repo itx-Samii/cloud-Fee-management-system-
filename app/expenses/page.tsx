@@ -152,7 +152,7 @@ export default function ExpenseManager() {
         {/* Right Side: Expense List & Total */}
         <div style={{flex: '2'}}>
           
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
             <div className="glass-panel" style={{padding: '1.5rem', background: 'var(--bg-card)', borderLeft: '4px solid var(--danger)', display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
               <span style={{color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em'}}>
                 {(monthFilter === 'all' && yearFilter === 'all') ? 'Current Month Spending' : 'Selected Period Spending'}

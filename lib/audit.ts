@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getDb, type Db } from './db';
 import { toNumber } from './http';
 import type { Session } from './session';
 
@@ -17,6 +17,8 @@ export type AuditAction =
   | 'student.edit'
   | 'student.delete'
   | 'student.import'
+  | 'student.promote'
+  | 'student.unpromote'
   | 'class.add'
   | 'class.edit'
   | 'class.delete'
@@ -30,6 +32,10 @@ export type AuditAction =
   | 'user.add'
   | 'user.edit'
   | 'user.delete'
+  | 'parent.add'
+  | 'parent.reset'
+  | 'parent.reveal'
+  | 'parent.remove'
   | 'backup.download'
   | 'backup.restore'
   | 'settings.edit';
@@ -55,17 +61,18 @@ export function describeChanges(before: object, after: object, labels: Record<st
 }
 
 /**
- * Adds a line to the school's Activity Log. A failed write is logged and swallowed: by now the
- * action itself has happened, and the user must still be told it succeeded.
+ * With a transaction, failure aborts the action too. Older callers without a transaction
+ * have already saved their action, so those failures are logged without claiming it failed.
  */
-export async function audit(session: Session, action: AuditAction, summary: string): Promise<void> {
+export async function audit(session: Session, action: AuditAction, summary: string, tx?: Db): Promise<void> {
   try {
-    const db = await getDb();
+    const db = tx ?? await getDb();
     // Millisecond times, so the Activity Log can page with "older than the last one shown".
     await db`
       insert into audit_log (school_id, at, username, display_name, role, action, summary)
       values (${session.schoolId}, ${new Date().toISOString()}, ${session.username}, ${session.displayName}, ${session.role}, ${action}, ${summary})`;
   } catch (err) {
+    if (tx) throw err;
     console.error(`Audit log write failed (${action}):`, err);
   }
 }

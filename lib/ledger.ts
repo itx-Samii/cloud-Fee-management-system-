@@ -1,4 +1,4 @@
-import { rupees } from './audit';
+import { audit, rupees } from './audit';
 import { transaction, type Db } from './db';
 import { findAll, findById, insertIfNew, insertRecord, nothingReceived, readConfig, toId, updateRecord } from './dbHandler';
 import { featureOn } from './features';
@@ -17,6 +17,7 @@ import {
   monthlyBill,
   newVoucher,
   periodOf,
+  periodLabel,
   tuitionOwed,
   voucherStatus,
   withBalances,
@@ -63,7 +64,7 @@ export async function voucherWithBalance(schoolId: string, voucher: FeeVoucher):
  * Waits for, then holds until the transaction ends, the lock on one student's money (or on a
  * lone voucher with no student).
  */
-async function lockStudent(tx: Db, schoolId: string, studentId: unknown, voucherId: unknown) {
+export async function lockStudent(tx: Db, schoolId: string, studentId: unknown, voucherId?: unknown) {
   const key = studentId == null ? `${schoolId}:voucher:${voucherId}` : `${schoolId}:student:${studentId}`;
   await tx`select pg_advisory_xact_lock(hashtext(${key}))`;
 }
@@ -96,6 +97,7 @@ async function changeAnnualChargesPaid(tx: Db, schoolId: string, studentId: unkn
 }
 
 export interface PaymentInput {
+  requestId: string;
   paidTuition: number;
   paidAC: number;
   /** Waive the late fine on the vouchers this payment reaches instead of charging it. */
@@ -126,6 +128,16 @@ export async function receivePayment(session: Session, voucherId: RecordId, inpu
   const { lateFine, dueDays } = await loadFeeSettings(schoolId);
 
   return transaction(async (tx) => {
+    const fingerprint = JSON.stringify([id, input.paidTuition, input.paidAC, input.waiveFine, input.advance]);
+    await tx`select pg_advisory_xact_lock(hashtext(${`${schoolId}:payment:${input.requestId}`}))`;
+    const [previous] = await tx`select * from payments where school_id = ${schoolId} and request_id = ${input.requestId}`;
+    if (previous) {
+      if (previous.requestFingerprint !== fingerprint) throw new Refused('This payment request was already used with different details. Reload the voucher.');
+      if (previous.reversedAt) throw new Refused('This payment was already received and reversed. Start a new payment.');
+      const voucher = await findById<FeeVoucher>('fees', schoolId, id, tx);
+      if (!voucher) throw new Refused('This payment was already received, but its voucher is no longer available. Check the Cash Book.');
+      return { receipt: previous as unknown as Payment, voucher };
+    }
     const [peek] = await tx`select student_id from fees where school_id = ${schoolId} and id = ${id}`;
     if (!peek) return null;
     await lockStudent(tx, schoolId, peek.studentId, id);
@@ -230,6 +242,8 @@ export async function receivePayment(session: Session, voucherId: RecordId, inpu
       'payments',
       schoolId,
       {
+        requestId: input.requestId,
+        requestFingerprint: fingerprint,
         voucherId: target.id,
         studentId: target.studentId,
         studentName: target.studentName,
@@ -247,6 +261,19 @@ export async function receivePayment(session: Session, voucherId: RecordId, inpu
       tx
     )) as unknown as Payment;
 
+    const months = (lines: Allocation[]) => lines.map((a) => `${periodLabel(a)} ${rupees(a.amount)}`).join(', ');
+    const otherAllocations = allocations.filter((a) => String(a.voucherId) !== String(target.id) && a.amount > 0);
+    const arrears = otherAllocations.filter((a) => !a.created);
+    const advance = otherAllocations.filter((a) => a.created);
+    const charged = allocations.reduce((sum, a) => sum + (a.fineCharged ?? 0), 0);
+    const waived = allocations.reduce((sum, a) => sum + (a.fineWaived ?? 0), 0);
+    const notes = [
+      arrears.length ? `incl. arrears ${months(arrears)}` : '',
+      advance.length ? `advance fee ${months(advance)}` : '',
+      charged ? `late fine ${rupees(charged)} charged` : '',
+      waived ? `late fine ${rupees(waived)} waived` : '',
+    ].filter(Boolean);
+    await audit(session, 'payment.receive', `Received ${rupees(receipt.amount)} from ${target.studentName ?? 'student'} for ${periodLabel(target)} (voucher #${target.id}, receipt #${receipt.id})${notes.length ? `; ${notes.join('; ')}` : ''}`, tx);
     return { receipt, voucher };
   });
 }
@@ -301,7 +328,9 @@ export async function reverseReceipt(session: Session, receiptId: RecordId): Pro
     const [peek] = await tx`select student_id, voucher_id from payments where school_id = ${schoolId} and id = ${id}`;
     if (!peek) return null;
     await lockStudent(tx, schoolId, peek.studentId, peek.voucherId);
-    return undoReceipt(tx, session, id);
+    const receipt = await undoReceipt(tx, session, id);
+    if (receipt) await audit(session, 'payment.reverse', `Reversed receipt #${receipt.id}: ${rupees(receipt.amount)} from ${receipt.studentName ?? 'student'} for ${periodLabel(receipt)}`, tx);
+    return receipt;
   });
 }
 
@@ -343,6 +372,7 @@ export async function reverseVoucher(session: Session, voucherId: RecordId): Pro
     // Whatever is still on it was paid before receipts existed; only the voucher knows about it.
     takenBack += num(voucher.totalReceived);
     if (num(voucher.paidAC) > 0) await changeAnnualChargesPaid(tx, schoolId, voucher.studentId, -num(voucher.paidAC));
+    await audit(session, 'voucher.delete', `Reversed voucher #${voucher.id} of ${voucher.studentName ?? 'student'} for ${periodLabel(voucher)} (${receipts.length} receipt(s)): ${rupees(takenBack)} taken back`, tx);
     return { voucher, takenBack, receipts: receipts.length };
   });
 }

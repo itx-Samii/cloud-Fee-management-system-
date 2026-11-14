@@ -1,10 +1,10 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
-import './generate.css';
-import { clearStoredSetting, useStoredSetting } from '@/lib/useStoredSetting';
+import ChallanBranding from './ChallanBranding';
+import { useChallanBranding } from './useChallanBranding';
 import { useFeeSettings } from '@/lib/useFeeSettings';
 import { useFeatures } from '@/lib/useFeatures';
-import ChallanBill from '../components/ChallanBill';
+import ChallanDocument from '../components/ChallanDocument';
 import FeeSettingsFields from '../components/FeeSettingsFields';
 import { COMMON_CHARGES, VoucherCharges } from '../components/ChargesEditor';
 import type { FeeVoucher, RecordId, SchoolClass } from '@/lib/types';
@@ -25,19 +25,8 @@ async function fetchClassList(): Promise<SchoolClass[]> {
 export default function GenerateFees() {
   const [fees, setFees] = useState<FeeVoucher[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [schoolName, setSchoolName] = useStoredSetting('fms-school-name', 'YOUR SCHOOL NAME');
-  const [schoolAddress, setSchoolAddress] = useStoredSetting('fms-school-address', 'Rawalpindi, Pakistan');
-  const [logo, setLogo] = useStoredSetting('fms-school-logo', '');
   const [printTargetId, setPrintTargetId] = useState<RecordId | null>(null);
-
-  // Professional Branding States (saved in this browser)
-  const [bankName, setBankName] = useStoredSetting('fms-bank-name', 'Meezan Bank Limited');
-  const [bankBranch, setBankBranch] = useStoredSetting('fms-bank-branch', 'Bank Road Sadar, Rawalpindi');
-  const [bankAccountTitle, setBankAccountTitle] = useStoredSetting('fms-bank-title', 'YOUR SCHOOL SYSTEM');
-  const [bankAccountNo, setBankAccountNo] = useStoredSetting('fms-bank-no', '0000-000000-0000');
-  const [instituteId, setInstituteId] = useStoredSetting('fms-inst-id', '2109');
-  const [paymentMethods, setPaymentMethods] = useStoredSetting('fms-pay-methods', '1. CASH DEPOSIT AT ALL BRANCHES OF MENTIONED BANK.\n2. ONLINE VIA MOBILE BANKING OR ATM.');
-  const [challanNote, setChallanNote] = useStoredSetting('fms-note', 'Fine is imposed to maintain discipline. Amount of fine is donated as charity.');
+  const branding = useChallanBranding();
   // Due days and late fine are school-wide (the server charges the fine), not per browser.
   const { settings: feeSettings, save: saveFeeSettings, canEdit: canEditFees } = useFeeSettings();
   const [showConfig, setShowConfig] = useState(false);
@@ -73,35 +62,9 @@ export default function GenerateFees() {
   const [addingCharge, setAddingCharge] = useState(false);
 
   useEffect(() => {
-    // Inject dynamic @page style for A4 landscape
-    const styleEl = document.createElement('style');
-    styleEl.id = 'print-page-style-landscape';
-    styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 5mm !important; } }`;
-    document.head.appendChild(styleEl);
-
-    return () => {
-      const el = document.getElementById('print-page-style-landscape');
-      if (el) el.remove();
-    };
-  }, []);
-
-  useEffect(() => {
     fetchMonthFees();
     fetchClassList().then(setClasses).catch(() => console.error("Failed to fetch classes"));
   }, [fetchMonthFees]);
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        if (!setLogo(ev.target?.result as string)) {
-          alert('Image too large for local storage! Please select a smaller logo (under 2MB).');
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const [selectedClass, setSelectedClass] = useState('all');
 
@@ -177,8 +140,8 @@ export default function GenerateFees() {
 
 
   return (
-    <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div className="no-print" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem', gap: '1.5rem', background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--border)'}}>
+    <div className="generate-vouchers" style={{animation: 'fadeIn 0.5s ease-out'}}>
+      <div className="no-print" style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem', gap: '1.5rem', background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--border)'}}>
         <div style={{flex: 1, display: 'flex', gap: '1rem'}}>
           <div>
             <label className="form-label">Billing Month</label>
@@ -209,7 +172,7 @@ export default function GenerateFees() {
             className="btn btn-primary" 
             style={{height: '42px', padding: '0 1.5rem', fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}
             onClick={handlePrintBulk}
-            disabled={isGenerating}
+            disabled={isGenerating || !branding.ready}
           >
             <span>🖨️</span> {isGenerating ? 'Processing...' : `Print Class Challans (${filteredFees.length})`}
           </button>
@@ -224,47 +187,28 @@ export default function GenerateFees() {
         </div>
       </div>
 
+      <div className="no-print" style={{display: 'flex', justifyContent: 'flex-end', gap: '.65rem', flexWrap: 'wrap', marginBottom: '1rem'}}>
+        {filteredFees.length > 0 && has('charges') && (
+          <button type="button" className="btn btn-secondary" onClick={() => setShowBulkCharge(!showBulkCharge)}>+ Charge for all shown</button>
+        )}
+        <button type="button" className="btn btn-secondary" aria-expanded={showConfig} onClick={() => setShowConfig(!showConfig)}>Challan Config</button>
+      </div>
+      {showConfig && (
+        <div className="glass-panel no-print challan-config">
+          <ChallanBranding {...branding} canEdit={canEditFees} />
+          <div className="challan-config-fees">
+            <FeeSettingsFields settings={feeSettings} canEdit={canEditFees} onSave={saveFeeSettings} />
+          </div>
+        </div>
+      )}
+      {branding.error && !showConfig && <p className="no-print" role="alert">{branding.error} Open Challan Config to retry.</p>}
+
       {filteredFees.length === 0 ? (
         <div className="glass-panel no-print" style={{padding: '4rem', textAlign: 'center'}}>
           <h3 style={{color: 'var(--text-muted)'}}>{fees.length > 0 ? "No vouchers match your filters." : "No vouchers generated for this billing cycle yet."}</h3>
         </div>
       ) : (
         <>
-          <div className="no-print" style={{marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem', background: 'var(--bg-card)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)'}}>
-            <div style={{flex: 1, display: 'flex', alignItems: 'center', gap: '1rem'}}>
-               <strong style={{color: 'var(--text-main)', whiteSpace: 'nowrap'}}>Challan Branding:</strong>
-               <input 
-                 type="text" 
-                 placeholder="School Name" 
-                 className="form-input" 
-                 style={{height: '35px', fontSize: '0.85rem', maxWidth: '200px'}}
-                 value={schoolName}
-                 onChange={e => setSchoolName(e.target.value)}
-               />
-               <input 
-                 type="text" 
-                 placeholder="Location / Contact" 
-                 className="form-input" 
-                 style={{height: '35px', fontSize: '0.85rem'}}
-                 value={schoolAddress}
-                 onChange={e => setSchoolAddress(e.target.value)}
-               />
-            </div>
-            <div style={{width: '1px', height: '25px', background: 'var(--border)'}}></div>
-            <strong style={{color: 'var(--text-main)', whiteSpace: 'nowrap'}}>Logo:</strong>
-            <input type="file" accept="image/*" onChange={handleLogoUpload} style={{fontSize: '0.8rem'}} />
-            {logo && <button className="btn btn-secondary" onClick={() => clearStoredSetting('fms-school-logo')} style={{padding: '0.4rem'}}>Remove</button>}
-            
-            {has('charges') && (
-              <button className="btn btn-secondary" onClick={() => setShowBulkCharge(!showBulkCharge)} style={{padding: '0.4rem 1rem'}}>
-                 + Charge for all shown
-              </button>
-            )}
-            <button className="btn btn-secondary" onClick={() => setShowConfig(!showConfig)} style={{padding: '0.4rem 1rem', marginLeft: has('charges') ? undefined : 'auto'}}>
-               ⚙️ Challan Config
-            </button>
-          </div>
-
           {showBulkCharge && has('charges') && (
             <form onSubmit={handleBulkCharge} className="glass-panel no-print" style={{padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap'}}>
               <div style={{flex: '2 1 200px'}}>
@@ -285,42 +229,6 @@ export default function GenerateFees() {
                 Goes on every voucher in the list below ({genMonth} {genYear}{selectedClass !== 'all' ? `, ${selectedClass}` : ', all classes'}{searchQuery ? ', matching the search' : ''}). It is added to what each student owes and shows on the challan.
               </p>
             </form>
-          )}
-
-          {showConfig && (
-            <div className="glass-panel no-print" style={{padding: '2rem', marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', backdropFilter: 'blur(10px)'}}>
-               <div>
-                  <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK NAME</label>
-                  <input className="form-input" value={bankName} onChange={e => setBankName(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-               </div>
-               <div>
-                  <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK BRANCH / ADDRESS</label>
-                  <input className="form-input" value={bankBranch} onChange={e => setBankBranch(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-               </div>
-               <div>
-                  <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT TITLE</label>
-                  <input className="form-input" value={bankAccountTitle} onChange={e => setBankAccountTitle(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-               </div>
-               <div>
-                  <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>ACCOUNT NUMBER</label>
-                  <input className="form-input" value={bankAccountNo} onChange={e => setBankAccountNo(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-               </div>
-               <div style={{display: 'flex', gap: '1.5rem'}}>
-                  <div style={{flex: 1.5}}>
-                    <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>INSTITUTE ID</label>
-                    <input className="form-input" value={instituteId} onChange={e => setInstituteId(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-                  </div>
-                  <FeeSettingsFields settings={feeSettings} canEdit={canEditFees} onSave={saveFeeSettings} inputStyle={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
-               </div>
-               <div style={{gridColumn: '1 / -1'}}>
-                  <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>PAYMENT METHODS (ONE PER LINE)</label>
-                  <textarea className="form-input" rows={3} value={paymentMethods} onChange={e => setPaymentMethods(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.8rem'}} />
-               </div>
-               <div style={{gridColumn: '1 / -1'}}>
-                  <label className="form-label" style={{fontSize: '0.7rem', color: 'var(--primary)'}}>CHALLAN FOOTER NOTE</label>
-                  <input className="form-input" value={challanNote} onChange={e => setChallanNote(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '0.85rem'}} />
-               </div>
-            </div>
           )}
 
           <div className="glass-panel table-container no-print">
@@ -366,7 +274,7 @@ export default function GenerateFees() {
                         <button 
                            className="btn btn-primary" 
                            style={{padding: '0.3rem 0.8rem', fontSize: '0.8rem'}}
-                           onClick={() => handlePrintIndividual(f.id)}
+                           disabled={!branding.ready} onClick={() => handlePrintIndividual(f.id)}
                         >
                            Print
                         </button>
@@ -405,7 +313,7 @@ export default function GenerateFees() {
           </div>
 
           {chargesFor && (
-            <div className="no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+            <div className="no-print workspace-modal" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
               <div className="glass-panel" style={{width: '100%', maxWidth: '480px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto'}}>
                 <h2 style={{marginBottom: '0.25rem'}}>Charges on voucher #{chargesFor.id}</h2>
                 <p style={{marginBottom: '1.25rem'}}>{chargesFor.studentName}, {chargesFor.month} {chargesFor.year}. Added on top of the monthly fee (admission fee, exam fee...).</p>
@@ -419,76 +327,9 @@ export default function GenerateFees() {
           )}
 
           <div className="print-container print-only">
-            {(printTargetId === -1 ? filteredFees : (printTargetId ? filteredFees.filter(f => f.id?.toString() === printTargetId?.toString()) : [])).map(f => {
-              return (
-                <div key={f.id} className="voucher-card">
-                  {['Bank Copy', 'Student Copy', 'Information'].map((section, sectionIdx) => (
-                    <div key={section} className="voucher-copy" style={{
-                      borderRight: sectionIdx < 2 ? '1px solid #000' : 'none',
-                    }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
-                      {logo && <img src={logo} alt="Watermark" className="logo-watermark" />}
-                      <div className="voucher-content">
-                         {sectionIdx < 2 ? (
-                           <>
-                             {/* Header */}
-                             <div className="copy-header">{section}</div>
-                             <div style={{textAlign: 'center', marginBottom: '2mm'}}>
-                                <h4 style={{margin: 0, fontSize: '10pt'}}>{bankName}</h4>
-                                <p style={{margin: 0, fontSize: '7pt'}}>{bankBranch}</p>
-                                <p style={{margin: '0.5mm 0', fontSize: '7pt', fontWeight: 700}}>( {bankAccountNo} )</p>
-                             </div>
-
-                             <div style={{border: '1px solid #000', padding: '1mm', fontSize: '8pt', marginBottom: '2mm', textAlign: 'center'}}>
-                                <strong>A/C Title: {bankAccountTitle}</strong>
-                             </div>
-
-                             {/* Info Grid */}
-                             <div className="info-grid">
-                                <div className="info-item"><strong>Document No</strong> <span>{f.id}</span></div>
-                                <div className="info-item"><strong>Date</strong> <span>{new Date().toLocaleDateString('en-GB')}</span></div>
-                                <div className="info-item"><strong>Student Name</strong> <span>{f.studentName}</span></div>
-                                <div className="info-item"><strong>Father Name</strong> <span>{f.fatherName}</span></div>
-                                <div className="info-item"><strong>Student ID</strong> <span>{f.admissionNumber || 'N/A'}</span></div>
-                                <div className="info-item"><strong>Session</strong> <span>{f.month} {f.year}</span></div>
-                                <div className="info-item"><strong>Program</strong> <span>{f.className}</span></div>
-                                <div className="info-item"><strong>Institute ID</strong> <span>{instituteId}</span></div>
-                             </div>
-
-                             {/* Table */}
-                             <ChallanBill voucher={f} settings={feeSettings} />
-
-                             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto'}}>
-                                <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Student Signature</div>
-                                <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Cashier Stamp</div>
-                             </div>
-                           </>
-                         ) : (
-                           <>
-                             <div className="copy-header">INFORMATION</div>
-                             <div style={{fontSize: '8pt', whiteSpace: 'pre-line', lineHeight: '1.4'}}>
-                                {paymentMethods}
-                             </div>
-                             
-                             <div style={{marginTop: 'auto', borderTop: '1pt solid #eee', paddingTop: '3mm'}}>
-                                <div style={{fontSize: '8pt', fontWeight: 700, marginBottom: '2mm'}}>Important Notes:</div>
-                                <p style={{fontSize: '7pt', color: '#444', margin: 0}}>{challanNote}</p>
-                             </div>
-                             
-                             <div style={{textAlign: 'center', marginTop: '5mm'}}>
-                                {/* eslint-disable-next-line @next/next/no-img-element -- logo is a data URL saved in this browser; next/image can't optimise it */}
-                                {logo && <img src={logo} alt="Logo" style={{width: '80px', height: '80px', objectFit: 'contain', opacity: 0.8}} />}
-                                <div style={{fontSize: '9pt', fontWeight: 800, marginTop: '2mm'}}>{schoolName}</div>
-                                <div style={{fontSize: '7pt'}}>{schoolAddress}</div>
-                             </div>
-                           </>
-                         )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
+            {(printTargetId === -1 ? filteredFees : filteredFees.filter((fee) => printTargetId != null && String(fee.id) === String(printTargetId))).map((fee) => (
+              <ChallanDocument key={fee.id} voucher={fee} profile={branding.profile} settings={feeSettings} />
+            ))}
           </div>
         </>
       )}

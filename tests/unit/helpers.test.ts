@@ -12,8 +12,10 @@ describe('session cookie', () => {
     vi.useRealTimers();
   });
 
-  it('reads back what it signed', () => {
-    expect(decodeSession(encodeSession(principal))).toEqual(principal);
+  it('reads back what it signed, with when it was signed', () => {
+    const session = decodeSession(encodeSession(principal));
+    expect(session).toEqual({ ...principal, issuedAt: expect.any(Number) });
+    expect(Math.abs((session?.issuedAt ?? 0) - Date.now())).toBeLessThan(2000);
   });
 
   it('rejects a cookie whose contents were changed', () => {

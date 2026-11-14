@@ -2,26 +2,20 @@
 
 ## Before you send anything
 
-The app stores everything in a Supabase (PostgreSQL) database, so it needs an internet connection and the database's connection string.
-
-- **Several schools?** Prefer hosting the app once on a server and giving each school its own principal login from the Super Admin panel. Schools then only need a browser.
-- **Installing on a school's own PC?** Give that school a Supabase project of its own. Never copy your own `.env.local` to a client: whoever has that file has full access to the database.
-- **Getting the connection string.** In the Supabase project click **Connect**, copy the **Session pooler** string and put the database password in place of `[YOUR-PASSWORD]`. If the password has symbols such as `@ # / ?`, reset it in Supabase (Project Settings → Database) to letters and numbers.
-- **Plan.** Supabase's free plan pauses a project nobody has used for a while (a long holiday, say) and keeps no backups. For a school in daily use, take the Pro plan, and download a backup from the Dashboard every week anyway.
-- **Already using the MongoDB version?** Move the data across once with `npm run db:import` before switching (see README, "Moving from the MongoDB version").
+The Windows installation stores school data on that computer in a local PostgreSQL database. Daily fee collection, reports and printing do not require internet. Initial installation and WhatsApp messaging do require internet.
 
 ## 1. Prepare the ZIP
 
-From the project folder, delete `.next`, `node_modules` and `.env.local` (if present), then zip the folder as `Fee_Management_Setup.zip`.
+Package source files only. Exclude `.env.local`, `.local-postgres`, `.next`, `.git` and `node_modules` from the ZIP; keep the working originals safely on your computer. Never distribute your school's data or passwords to another school.
 
 ## 2. Steps for the school
 
-1. **Extract** — right-click the ZIP, choose **Extract All**, and move the folder somewhere permanent (Desktop or Documents).
-2. **Install** — double-click `INSTALL_ERP.bat`.
-   - If Node.js is missing it downloads and installs it, then asks you to run the installer again.
-   - The first time, Notepad opens a settings file (`.env.local`). Paste the Supabase connection string into `DATABASE_URL`, save, close Notepad and run the installer again.
-   - Wait for **INSTALLATION SUCCESSFUL**.
-3. **Start** — double-click the **Fee Management System** icon on the Desktop. The browser opens the login page.
+1. Extract the ZIP into a permanent folder.
+2. Run `INSTALL_ERP.bat`. It installs dependencies, creates random local database settings if none exist, builds the app and creates a desktop shortcut. Existing settings and data are preserved.
+3. Start the desktop shortcut or `RUN_ERP.bat`. This starts both the local database and app. Open http://localhost:3001 and keep the launcher window open.
+4. Keep `.local-postgres/` and the original `.env.local` together. Download school backups regularly to a separate drive. After restarting Windows, start the shortcut again.
+
+Existing online data is not imported automatically. The offline launcher refuses online database addresses. Parent access from outside this computer requires a separately configured network deployment.
 
 ## 3. First login
 

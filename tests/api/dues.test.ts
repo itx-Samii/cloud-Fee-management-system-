@@ -16,7 +16,7 @@ let nextName = 1;
 
 /** A new student (fee 3000) with a voucher for each month given, in that order. */
 async function studentBilledFor(months: string[], extra: Record<string, unknown> = {}) {
-  signInAs('admin');
+  await signInAs('admin');
   const student = (
     await call(addStudent, 'POST', '/api/students', { name: `Dues Student ${nextName++}`, classId: '900', monthlyFee: 3000, ...extra })
   ).data;
@@ -40,7 +40,7 @@ describe('arrears', () => {
 
   it('clears the oldest month first and records where the money went', async () => {
     const { byMonth } = await studentBilledFor(['August', 'September', 'October']);
-    signInAs('accountant');
+    await signInAs('accountant');
     const paid = await call(pay, 'PUT', '/api/fees', { id: byMonth.October.id, paidTuition: 7000, paidAC: 0 });
     expect(paid.status).toBe(200);
     expect(paid.data.allocations.map((a: any) => [a.month, a.amount])).toEqual([
@@ -52,18 +52,18 @@ describe('arrears', () => {
     expect((await voucher(byMonth.September.id)).status).toBe('Paid');
     expect(paid.data).toMatchObject({ status: 'Partially Paid', previousArrears: 0, balanceDue: 2000 });
 
-    signInAs('admin');
+    await signInAs('admin');
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=payment');
     expect(log.data[0].summary).toContain('incl. arrears August 2026 Rs. 3,000, September 2026 Rs. 3,000');
   });
 
   it('reversing a receipt undoes every month it paid', async () => {
     const { byMonth } = await studentBilledFor(['September', 'October']);
-    signInAs('accountant');
+    await signInAs('accountant');
     const paid = await call(pay, 'PUT', '/api/fees', { id: byMonth.October.id, paidTuition: 6000, paidAC: 0 });
 
     expect((await call(reverseReceipt, 'DELETE', `/api/payments?id=${paid.data.receiptNo}`)).status).toBe(403);
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(reverseReceipt, 'DELETE', `/api/payments?id=${paid.data.receiptNo}`)).status).toBe(200);
     expect((await call(reverseReceipt, 'DELETE', `/api/payments?id=${paid.data.receiptNo}`)).status).toBe(404);
 
@@ -90,16 +90,16 @@ describe('arrears', () => {
 
 describe('late fines', () => {
   it('only the principal changes fee settings, within sensible limits', async () => {
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(getSettings, 'GET', '/api/settings')).data).toEqual({ dueDays: 10, lateFine: 0, lateFineOn: true, schoolName: 'Brook Field School System' });
     expect((await call(saveSettings, 'PUT', '/api/settings', { lateFine: 100 })).status).toBe(403);
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(saveSettings, 'PUT', '/api/settings', { lateFine: -5 })).status).toBe(400);
     expect((await call(saveSettings, 'PUT', '/api/settings', { dueDays: 2.5 })).status).toBe(400);
   });
 
   it('adds the fine to an overdue voucher and fixes it once paid late', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 0, lateFine: 500 });
     const { byMonth } = await studentBilledFor(['October']);
     const due = await voucher(byMonth.October.id);
@@ -112,10 +112,10 @@ describe('late fines', () => {
 
   it('lets the cashier waive the fine, and logs it', async () => {
     const { byMonth } = await studentBilledFor(['October']);
-    signInAs('accountant');
+    await signInAs('accountant');
     const paid = await call(pay, 'PUT', '/api/fees', { id: byMonth.October.id, paidTuition: 3000, paidAC: 0, waiveFine: true });
     expect(paid.data).toMatchObject({ status: 'Paid', fineWaived: true, lateFine: 0 });
-    signInAs('admin');
+    await signInAs('admin');
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=payment');
     expect(log.data[0].summary).toContain('late fine Rs. 500 waived');
   });
@@ -136,14 +136,14 @@ describe('late fines', () => {
       month: 'May', year: '2026', amount: 3000, status: 'Unpaid', issueDate: '2026-05-01T00:00:00.000Z',
     });
     expect(await voucher(555001)).toMatchObject({ lateFine: 0, balanceDue: 3000 });
-    signInAs('admin');
+    await signInAs('admin');
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 10, lateFine: 0 });
   });
 });
 
 describe('students who leave', () => {
   it('are no longer billed or counted in their class, but keep their history', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const cls = (await call(addClass, 'POST', '/api/classes', { name: 'Leavers', section: 'X', monthlyFee: 2000 })).data;
     const student = (await call(addStudent, 'POST', '/api/students', { name: 'Moving Away', classId: String(cls.id), monthlyFee: 2000 })).data;
     await call(generate, 'POST', '/api/fees', { month: 'September', year: '2026', studentIds: [student.id] });
@@ -166,7 +166,7 @@ describe('students who leave', () => {
 
 describe('defaulter list', () => {
   it('lists who owes what, biggest first, with months and oldest unpaid month', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 0 });
     const cls = (await call(addClass, 'POST', '/api/classes', { name: 'Defaulters', section: 'D', monthlyFee: 1000 })).data;
     const add = async (name: string, months: string[]) => {
@@ -190,7 +190,7 @@ describe('defaulter list', () => {
   });
 
   it('leaves out bills that are not due yet', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 10 });
     const cls = (await call(addClass, 'POST', '/api/classes', { name: 'Not Due', section: 'N', monthlyFee: 1000 })).data;
     const s = (await call(addStudent, 'POST', '/api/students', { name: 'Billed Today', classId: String(cls.id), monthlyFee: 1000 })).data;
@@ -201,7 +201,7 @@ describe('defaulter list', () => {
 
 describe('families', () => {
   it('links brothers and sisters by parent phone, however it is written', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const add = async (name: string, parentPhone?: string) =>
       (await call(addStudent, 'POST', '/api/students', { name, classId: '900', monthlyFee: 2000, parentPhone })).data;
     const elder = await add('Elder Sibling', '0300-1234567');
@@ -218,7 +218,7 @@ describe('families', () => {
   });
 
   it('refuses something that is not a phone number', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const res = await call(addStudent, 'POST', '/api/students', { name: 'Bad Phone', classId: '900', parentPhone: 'call father' });
     expect(res.status).toBe(400);
   });
@@ -226,7 +226,7 @@ describe('families', () => {
 
 describe('importing students', () => {
   it('adds every row, using the class fee when the file has none', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const cls = (await call(addClass, 'POST', '/api/classes', { name: 'Import', section: 'B', monthlyFee: 2500, annualCharges: 4000 })).data;
     const res = await call(importStudents, 'POST', '/api/students/import', {
       rows: [
@@ -243,7 +243,7 @@ describe('importing students', () => {
   });
 
   it('imports nothing if any row is wrong, and says which rows', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const before = await countRows('students');
     const res = await call(importStudents, 'POST', '/api/students/import', {
       rows: [
@@ -261,7 +261,7 @@ describe('importing students', () => {
   });
 
   it('is for principals only', async () => {
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(importStudents, 'POST', '/api/students/import', { rows: [{ name: 'X', className: 'Import' }] })).status).toBe(403);
   });
 });
@@ -269,7 +269,7 @@ describe('importing students', () => {
 describe('charges on vouchers', () => {
   it('adds to what the month owes, carries into arrears, and is logged', async () => {
     const { byMonth } = await studentBilledFor(['September', 'October']);
-    signInAs('accountant');
+    await signInAs('accountant');
     const res = await call(setCharges, 'PATCH', '/api/fees', { id: byMonth.September.id, charges: [{ label: 'Exam Fee', amount: 500 }] });
     expect(res.status).toBe(200);
     expect(res.data).toMatchObject({ amount: 3500, charges: [{ label: 'Exam Fee', amount: 500 }], balanceDue: 3500 });
@@ -282,7 +282,7 @@ describe('charges on vouchers', () => {
     expect(refused.status).toBe(400);
     expect(refused.data.error).toContain('already been paid');
 
-    signInAs('admin');
+    await signInAs('admin');
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=voucher');
     expect(log.data[0].summary).toContain('none → Exam Fee Rs. 500');
   });
@@ -295,7 +295,7 @@ describe('charges on vouchers', () => {
   });
 
   it("adds one charge to a whole class's vouchers, once", async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const cls = (await call(addClass, 'POST', '/api/classes', { name: 'Exam Class', section: 'E', monthlyFee: 2000 })).data;
     for (const name of ['Exam One', 'Exam Two']) {
       await call(addStudent, 'POST', '/api/students', { name, classId: String(cls.id), monthlyFee: 2000 });
@@ -304,7 +304,7 @@ describe('charges on vouchers', () => {
     const ids = (await call(listFees, 'GET', `/api/fees?classId=${cls.id}&month=October&year=2026`)).data.map((v: any) => v.id);
     expect(ids).toHaveLength(2);
 
-    signInAs('accountant');
+    await signInAs('accountant');
     const charge = { label: 'Examination Fee', amount: 700 };
     expect((await call(setCharges, 'PATCH', '/api/fees', { ids, charge })).data).toMatchObject({ added: 2, skipped: 0 });
     expect((await call(setCharges, 'PATCH', '/api/fees', { ids, charge: { ...charge, label: 'examination fee' } })).data).toMatchObject({ added: 0, skipped: 2 });
@@ -313,7 +313,7 @@ describe('charges on vouchers', () => {
   });
 
   it('a settled month that owes again gets time to pay before any fine', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 0, lateFine: 0 });
     const { byMonth } = await studentBilledFor(['October']);
     await call(pay, 'PUT', '/api/fees', { id: byMonth.October.id, paidTuition: 3000, paidAC: 0 });
@@ -327,7 +327,7 @@ describe('charges on vouchers', () => {
   });
 
   it("puts a student's monthly charges on every new voucher and keeps unpaid ones in step", async () => {
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(addStudent, 'POST', '/api/students', { name: 'Bad Charge', classId: '900', monthlyCharges: [{ label: 'Transport' }] })).status).toBe(400);
     const { student, byMonth } = await studentBilledFor(['October'], { monthlyCharges: [{ label: 'Transport', amount: 1500 }] });
     expect(byMonth.October).toMatchObject({ amount: 4500, charges: [{ label: 'Transport', amount: 1500 }] });
@@ -349,7 +349,7 @@ describe('charges on vouchers', () => {
 describe('advance fee', () => {
   // Months well ahead of today, so they are still "to come" when a receipt is reversed.
   async function studentBilledAhead(months: string[], extra: Record<string, unknown> = {}) {
-    signInAs('admin');
+    await signInAs('admin');
     const student = (
       await call(addStudent, 'POST', '/api/students', { name: `Advance Student ${nextName++}`, classId: '900', monthlyFee: 2000, ...extra })
     ).data;
@@ -361,7 +361,7 @@ describe('advance fee', () => {
 
   it('refuses more than is owed unless the cashier marks it as advance', async () => {
     const { student, byMonth, vouchers } = await studentBilledAhead(['March'], { monthlyCharges: [{ label: 'Transport', amount: 1000 }] });
-    signInAs('accountant');
+    await signInAs('accountant');
     const refused = await call(pay, 'PUT', '/api/fees', { id: byMonth.March.id, paidTuition: 12000, paidAC: 0 });
     expect(refused.status).toBe(400);
     expect(refused.data.error).toContain('more than everything owed');
@@ -387,7 +387,7 @@ describe('advance fee', () => {
     expect(new Date(all[3].dueDate).getMonth()).toBe(5);
 
     // Generating May later leaves the paid-ahead voucher alone.
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(generate, 'POST', '/api/fees', { month: 'May', year: '2030', studentIds: [student.id] })).data.count).toBe(0);
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=payment');
     expect(log.data[0].summary).toContain('advance fee April 2030 Rs. 3,000, May 2030 Rs. 3,000, June 2030 Rs. 3,000');
@@ -415,7 +415,7 @@ describe('advance fee', () => {
     const { byMonth, vouchers } = await studentBilledAhead(['January']);
     const paid = await call(pay, 'PUT', '/api/fees', { id: byMonth.January.id, paidTuition: 6000, paidAC: 0, advance: true });
     expect((await vouchers()).length).toBe(3);
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(reverseReceipt, 'DELETE', `/api/payments?id=${paid.data.receiptNo}`)).status).toBe(200);
     expect((await vouchers()).map((v: any) => [v.month, v.status])).toEqual([['January', 'Unpaid']]);
   });
@@ -425,7 +425,7 @@ describe('advance fee', () => {
     const first = await call(pay, 'PUT', '/api/fees', { id: byMonth.January.id, paidTuition: 3000, paidAC: 0, advance: true });
     const february = (await vouchers())[1];
     await call(pay, 'PUT', '/api/fees', { id: february.id, paidTuition: 1000, paidAC: 0 });
-    signInAs('admin');
+    await signInAs('admin');
     await call(reverseReceipt, 'DELETE', `/api/payments?id=${first.data.receiptNo}`);
     expect((await vouchers()).map((v: any) => [v.month, v.status, v.paidTuition])).toEqual([
       ['January', 'Unpaid', 0],
@@ -436,7 +436,7 @@ describe('advance fee', () => {
   it('reversing the voucher takes the advance back too', async () => {
     const { byMonth, vouchers } = await studentBilledAhead(['January']);
     await call(pay, 'PUT', '/api/fees', { id: byMonth.January.id, paidTuition: 4000, paidAC: 0, advance: true });
-    signInAs('admin');
+    await signInAs('admin');
     const res = await call(deleteVoucher, 'DELETE', `/api/fees?id=${byMonth.January.id}`);
     expect(res.data).toMatchObject({ success: true, takenBack: 4000, receipts: 1 });
     expect(await vouchers()).toEqual([]);

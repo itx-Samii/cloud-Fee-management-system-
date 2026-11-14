@@ -32,4 +32,4 @@ echo ------------------------------------------------------------
 echo.
 
 start "" http://localhost:3001
-npm start
+call npm run offline

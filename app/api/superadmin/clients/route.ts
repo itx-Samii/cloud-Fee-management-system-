@@ -1,6 +1,5 @@
-import crypto from 'crypto';
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { getDb, transaction } from '@/lib/db';
 import { requireSession } from '@/lib/auth';
 import {
   LEGACY_SCHOOL_ID,
@@ -11,12 +10,16 @@ import {
   isUsernameTaken,
   updateConfig,
 } from '@/lib/dbHandler';
-import { DEFAULT_FEATURES, DEFAULT_MAX_STUDENTS, featuresOf, forgetLicenseStatus, isLegacySchool } from '@/lib/license';
+import { DEFAULT_FEATURES, DEFAULT_MAX_STUDENTS, featuresOf, forgetLicenseStatus, isLegacySchool, licenseStatus } from '@/lib/license';
 import { jsonError, readBody, toNumber, toText } from '@/lib/http';
+import { provisionSchool } from '@/lib/schoolProvisioning';
+import { MAX_TRIAL_DAYS, TRIAL_DAY_MS, trialDaysLeft } from '@/lib/trials';
 
 const PASSWORD_RULE = `Principal password must be at least ${MIN_PASSWORD_LENGTH} characters`;
 
 const maxStudentsOf = (value: unknown) => Math.min(1_000_000, Math.max(1, Math.round(toNumber(value, DEFAULT_MAX_STUDENTS))));
+const TRIAL_DAYS_ERROR = `Enter whole trial days from 1 to ${MAX_TRIAL_DAYS}.`;
+const validTrialDays = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_TRIAL_DAYS;
 
 export async function GET() {
   const session = await requireSession(['superadmin']);
@@ -47,7 +50,9 @@ export async function GET() {
         schoolId: c.schoolId,
         clientName: c.clientName,
         licenseKey: c.licenseKey,
-        status: c.status,
+        status: licenseStatus(c.status, c.trialExpiresAt),
+        trialExpiresAt: c.trialExpiresAt,
+        ...(c.trialExpiresAt && { trialDaysRemaining: trialDaysLeft(c.trialExpiresAt, Date.now()) }),
         maxStudents: c.maxStudents,
         currentStudents: c.currentStudents,
         features: featuresOf(c.features),
@@ -75,6 +80,8 @@ export async function POST(request: Request) {
   }
   if (!USERNAME_PATTERN.test(adminUsername)) return jsonError(USERNAME_RULES, 400);
   if (!adminPassword || adminPassword.length < MIN_PASSWORD_LENGTH) return jsonError(PASSWORD_RULE, 400);
+  const trialDays = body?.trialDays;
+  if (trialDays != null && !validTrialDays(trialDays)) return jsonError(TRIAL_DAYS_ERROR, 400);
 
   try {
     const db = await getDb();
@@ -82,18 +89,15 @@ export async function POST(request: Request) {
     if (keyTaken) return jsonError('License key already exists', 400);
     if (await isUsernameTaken(adminUsername)) return jsonError('Principal Login Username is already taken', 400);
 
-    const slug = clientName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const schoolId = `school_${slug}_${crypto.randomBytes(3).toString('hex')}`;
     const maxStudents = maxStudentsOf(body?.maxStudents);
-
-    const [created] = await db`
-      insert into licenses (school_id, client_name, admin_username, license_key, max_students, features)
-      values (${schoolId}, ${clientName}, ${adminUsername}, ${licenseKey}, ${maxStudents}, ${db.json(DEFAULT_FEATURES)})
-      returning *`;
-    await updateConfig(schoolId, { adminUsername, adminPassword: hashPassword(adminPassword), schoolName: clientName });
-
-    return NextResponse.json({ success: true, client: { ...created, id: schoolId } });
+    const passwordHash = hashPassword(adminPassword);
+    const trialExpiresAt = trialDays == null ? undefined : new Date(Date.now() + trialDays * TRIAL_DAY_MS).toISOString();
+    const created = await transaction((tx) => provisionSchool(tx, { clientName, adminUsername, passwordHash, licenseKey, maxStudents, trialExpiresAt }));
+    return NextResponse.json({ success: true, client: created });
   } catch (err) {
+    const constraint = (err as { constraint_name?: string })?.constraint_name;
+    if (constraint === 'school_settings_admin_username' || constraint === 'staff_login_name_unique') return jsonError('Principal Login Username is already taken', 400);
+    if (constraint === 'licenses_license_key_key') return jsonError('License key already exists', 400);
     console.error('Creating SaaS client failed:', err);
     return jsonError('Failed to create SaaS client', 500);
   }
@@ -109,6 +113,12 @@ export async function PUT(request: Request) {
 
   const status = toText(body.status);
   if (status && status !== 'active' && status !== 'blocked') return jsonError('Invalid status', 400);
+  const trialDays = body.trialDays;
+  if (trialDays != null && !validTrialDays(trialDays)) return jsonError(TRIAL_DAYS_ERROR, 400);
+  const expectedTrialExpiry = body.expectedTrialExpiry;
+  if (trialDays !== undefined && expectedTrialExpiry !== null && (typeof expectedTrialExpiry !== 'string' || !Number.isFinite(Date.parse(expectedTrialExpiry)))) {
+    return jsonError('Refresh the school’s license before changing its trial.', 400);
+  }
   const adminPassword = toText(body.adminPassword);
   if (adminPassword && adminPassword.length < MIN_PASSWORD_LENGTH) return jsonError(PASSWORD_RULE, 400);
 
@@ -133,13 +143,19 @@ export async function PUT(request: Request) {
 
     const [updated] = await db`
       update licenses set ${db(changes as Record<string, string>)}
+      ${trialDays === null ? db`, trial_expires_at = null`
+        : trialDays === undefined ? db``
+        : db`, trial_expires_at = date_trunc('milliseconds', greatest(clock_timestamp(), trial_expires_at)) + ${trialDays * 24} * interval '1 hour'`}
       where school_id = ${id}
+      ${trialDays === undefined ? db`` : db`and trial_expires_at is not distinct from ${expectedTrialExpiry as string | null}::timestamptz`}
       returning *`;
+
+    if (!updated) return jsonError('The school license changed. Refresh the client list and try again.', 409);
 
     if (adminPassword) await updateConfig(id, { adminPassword: hashPassword(adminPassword) });
     forgetLicenseStatus(id);
 
-    return NextResponse.json({ success: true, client: { ...updated, id } });
+    return NextResponse.json({ success: true, client: { ...updated, id, status: licenseStatus(updated.status, updated.trialExpiresAt) } });
   } catch (err) {
     console.error('Updating SaaS client failed:', err);
     return jsonError('Failed to update client profile', 500);

@@ -49,32 +49,6 @@ if %errorlevel% neq 0 (
 )
 echo [OK] Node.js is ready.
 
-:: 2. Database settings
-echo.
-echo [2/5] Checking database settings...
-if not exist ".env.local" (
-    copy ".env.example" ".env.local" >nul
-    echo [!] A settings file has been created: .env.local
-    echo [!] Put your Supabase connection string in DATABASE_URL, save it,
-    echo     then run this installer again.
-    start "" notepad ".env.local"
-    goto :stop
-)
-findstr /r /c:"^DATABASE_URL=postgres" ".env.local" >nul
-if errorlevel 1 (
-    echo [X] .env.local has no DATABASE_URL. Copy that line from .env.example, put your
-    echo     Supabase connection string in it and run this again.
-    start "" notepad ".env.local"
-    goto :stop
-)
-findstr /c:"YOUR-PROJECT-REF" ".env.local" >nul
-if %errorlevel% == 0 (
-    echo [X] .env.local still has the example DATABASE_URL. Put your real one in and run this again.
-    start "" notepad ".env.local"
-    goto :stop
-)
-echo [OK] Settings found.
-
 :: 3. Libraries
 echo.
 echo [3/5] Installing required libraries...
@@ -84,6 +58,12 @@ if errorlevel 1 (
     goto :failed
 )
 echo [OK] Libraries ready.
+
+:: Local settings are created once; existing data and passwords are never replaced.
+echo [2/5] Preparing offline database settings...
+call npm run offline:setup
+if errorlevel 1 goto :failed
+
 
 :: 4. Build
 echo.

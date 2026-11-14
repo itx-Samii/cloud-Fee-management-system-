@@ -1,5 +1,4 @@
 "use client";
-import React from "react";
 import { useStoredSetting } from '@/lib/useStoredSetting';
 
 export default function ThemeSwitcher() {
@@ -21,20 +20,12 @@ export default function ThemeSwitcher() {
 
   return (
     <div className="theme-switcher-box">
-      <p style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600}}>SYSTEM THEME</p>
+      <span>Theme</span>
       <select
+        aria-label="Workspace theme"
         value={theme}
         onChange={(e) => changeTheme(e.target.value)}
-        style={{
-          width: '100%',
-          padding: '0.6rem',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          color: 'var(--text-main)',
-          border: '1px solid var(--border)',
-          outline: 'none',
-          cursor: 'pointer'
-        }}
+        className="form-input"
       >
         {themes.map(t => (
           <option key={t.id} value={t.id}>{t.icon} {t.name}</option>

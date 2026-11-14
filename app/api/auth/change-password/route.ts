@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import { MIN_PASSWORD_LENGTH, findAll, hashPassword, readConfig, updateConfig, updateRecord, verifyPassword } from '@/lib/dbHandler';
 import { jsonError, readBody, toText } from '@/lib/http';
 import type { AppUser } from '@/lib/types';
 
 export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session) return jsonError('Your session has expired. Please log in again.', 401);
+  const session = await requireSession(['superadmin', 'admin', 'accountant']);
+  if (session instanceof NextResponse) return session;
 
   const body = await readBody(request);
   const oldPassword = toText(body?.oldPassword);

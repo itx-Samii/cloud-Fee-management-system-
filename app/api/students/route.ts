@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import { ADMIN, STAFF, hasFeature, requireFeature, requireSession } from '@/lib/auth';
 import { audit, describeChanges, describeCharges, rupees } from '@/lib/audit';
-import { getDb } from '@/lib/db';
+import { getDb, transaction, type Db } from '@/lib/db';
+import { lockStudent, Refused } from '@/lib/ledger';
 import {
   countCurrentStudents,
   deleteRecord,
   findAll,
   findById,
   insertRecord,
+  lockStudentNumbering,
   nothingReceived,
   toDbRow,
   toId,
@@ -54,12 +56,13 @@ export async function GET(request: Request) {
     }
 
     const filtered = students.filter((s) => {
-      const matchesSearch = [s.name, s.fatherName, s.admissionNumber].some((v) =>
+      const matchesSearch = [s.name, s.fatherName, s.admissionNumber, ...(classId !== 'all' ? [s.rollNumber] : [])].some((v) =>
         String(v ?? '').toLowerCase().includes(search)
       );
       const matchesStatus = status === 'active' ? !isLeft(s) : status === 'left' ? isLeft(s) : true;
       return matchesSearch && matchesStatus && (classId === 'all' || String(s.classId) === classId);
     });
+    if (classId !== 'all') filtered.sort((a, b) => (a.rollNumber ?? Infinity) - (b.rollNumber ?? Infinity));
 
     const pageItems = filtered
       .slice((page - 1) * limit, page * limit)
@@ -97,22 +100,14 @@ export async function POST(request: Request) {
   if (chargesLocked) return chargesLocked;
 
   try {
-    const [{ maxStudents }, current] = await Promise.all([getLicense(schoolId), countCurrentStudents(schoolId)]);
-    if (current >= maxStudents) {
-      return jsonError(
-        `Student capacity reached (${maxStudents} max limit). Please contact Super Admin to upgrade your SaaS license.`,
-        403
-      );
-    }
-
-    const student = await insertRecord(
-      'students',
-      schoolId,
-      withoutUndefined({
+    const { maxStudents } = await getLicense(schoolId);
+    const student = await transaction(async (tx) => {
+      await lockStudentNumbering(tx, schoolId);
+      if (await countCurrentStudents(schoolId, tx) >= maxStudents) return null;
+      return insertRecord('students', schoolId, withoutUndefined({
         name,
         fatherName: toText(body.fatherName),
         parentPhone,
-        admissionNumber: toText(body.admissionNumber) || undefined,
         classId: toText(body.classId),
         monthlyFee: toNumber(body.monthlyFee),
         annualCharges: toNumber(body.annualCharges),
@@ -121,8 +116,9 @@ export async function POST(request: Request) {
         paidAnnualCharges: 0,
         status: toText(body.status) || 'Active',
         createdAt: new Date().toISOString(),
-      })
-    );
+      }), tx);
+    });
+    if (!student) return jsonError(`Student capacity reached (${maxStudents} max limit). Please contact Super Admin to upgrade your SaaS license.`, 403);
     await audit(session, 'student.add', `Added student ${name} (#${student.id}), monthly fee ${rupees(student.monthlyFee)}`);
     return NextResponse.json(student);
   } catch (err) {
@@ -158,37 +154,51 @@ export async function PUT(request: Request) {
     name: toText(body.name),
     fatherName: toText(body.fatherName),
     parentPhone,
-    admissionNumber: toText(body.admissionNumber),
     classId: toText(body.classId),
     monthlyFee: optionalNumber(body.monthlyFee),
     discount: optionalNumber(body.discount),
     monthlyCharges,
     annualCharges: optionalNumber(body.annualCharges),
-    paidAnnualCharges: optionalNumber(body.paidAnnualCharges),
   });
 
   try {
-    const before = await findById<Student>('students', schoolId, id);
-    if (!before) return jsonError('Student not found', 404);
-    const now = new Date().toISOString();
-    const leaving = status === 'Left' && !isLeft(before);
-    const student = await updateRecord<Student>('students', schoolId, before.id, {
-      ...changes,
-      ...(leaving && { leftAt: now }),
-      updatedAt: now,
+    const student = await transaction(async (tx) => {
+      if (changes.classId !== undefined) await lockStudentNumbering(tx, schoolId);
+      await lockStudent(tx, schoolId, toId(id));
+      const before = await findById<Student>('students', schoolId, id, tx);
+      if (!before) return null;
+      if (body.paidAnnualCharges !== undefined && Number(body.paidAnnualCharges) !== Number(before.paidAnnualCharges ?? 0)) {
+        throw new Refused('Annual charges paid can only change through a receipt or reversal.');
+      }
+      if (body.expectedUpdatedAt !== undefined && body.expectedUpdatedAt !== (before.updatedAt ?? null)) {
+        throw new Refused('This student was changed by another user. Reload before saving.');
+      }
+      for (const field of ['monthlyFee', 'discount', 'annualCharges'] as const) {
+        if (changes[field] !== undefined && (!Number.isFinite(Number(body[field])) || Number(body[field]) < 0)) {
+          throw new Refused('Fees, discounts and annual charges must be valid non-negative amounts.');
+        }
+      }
+      const now = new Date().toISOString();
+      const leaving = status === 'Left' && !isLeft(before);
+      const updated = await updateRecord<Student>('students', schoolId, before.id, {
+        ...changes,
+        ...(leaving && { leftAt: now }),
+        updatedAt: now,
+      }, tx);
+      await syncUnpaidVouchers(tx, schoolId, before, changes);
+      const chargesBefore = describeCharges(before.monthlyCharges);
+      const chargesNow = changes.monthlyCharges && describeCharges(changes.monthlyCharges);
+      const changed = [
+        describeChanges(before, { ...changes, ...(updated?.rollNumber && { rollNumber: updated.rollNumber }) }, STUDENT_FIELDS),
+        chargesNow && chargesNow !== chargesBefore ? `monthly charges ${chargesBefore} → ${chargesNow}` : '',
+      ].filter(Boolean).join(', ');
+      if (changed) await audit(session, 'student.edit', `Edited ${before.name} (#${before.id}): ${changed}`, tx);
+      return updated;
     });
     if (!student) return jsonError('Student not found', 404);
-
-    await syncUnpaidVouchers(schoolId, before, changes);
-    const chargesBefore = describeCharges(before.monthlyCharges);
-    const chargesNow = changes.monthlyCharges && describeCharges(changes.monthlyCharges);
-    const changed = [
-      describeChanges(before, changes, STUDENT_FIELDS),
-      chargesNow && chargesNow !== chargesBefore ? `monthly charges ${chargesBefore} → ${chargesNow}` : '',
-    ].filter(Boolean).join(', ');
-    if (changed) await audit(session, 'student.edit', `Edited ${before.name} (#${before.id}): ${changed}`);
     return NextResponse.json(student);
   } catch (err) {
+    if (err instanceof Refused) return jsonError(err.message, 400);
     console.error(`PUT student failed for ${schoolId}:`, err);
     return jsonError('Failed to update student', 500);
   }
@@ -199,7 +209,7 @@ const STUDENT_FIELDS = {
   name: 'name',
   fatherName: 'father name',
   parentPhone: 'parent phone',
-  admissionNumber: 'admission no.',
+  rollNumber: 'roll number',
   classId: 'class',
   monthlyFee: 'monthly fee',
   discount: 'discount',
@@ -208,18 +218,16 @@ const STUDENT_FIELDS = {
 };
 
 /** Unpaid vouchers copy the student's details, fee and monthly charges, so carry edits over to them. */
-async function syncUnpaidVouchers(schoolId: string, before: Student, changes: Partial<Student>) {
-  const db = await getDb();
+async function syncUnpaidVouchers(db: Db, schoolId: string, before: Student, changes: Partial<Student>) {
   const unpaid = db`school_id = ${schoolId} and student_id = ${toId(before.id) ?? 0} and status <> 'Paid'`;
 
   const details: Record<string, unknown> = withoutUndefined({
     studentName: changes.name,
     fatherName: changes.fatherName,
-    admissionNumber: changes.admissionNumber,
     classId: changes.classId,
   });
   if (changes.classId !== undefined) {
-    const cls = await findById<SchoolClass>('classes', schoolId, changes.classId);
+    const cls = await findById<SchoolClass>('classes', schoolId, changes.classId, db);
     if (cls) details.className = `${cls.name}${cls.section ? ' - ' + cls.section : ''}`;
   }
   if (Object.keys(details).length > 0) {
@@ -250,6 +258,9 @@ async function syncUnpaidVouchers(schoolId: string, before: Student, changes: Pa
   }
 
   if (feeChanged || changes.monthlyCharges !== undefined) {
+    const [overpaid] = await db`select id from fees where ${unpaid}
+      and coalesce(paid_tuition, 0) > amount + coalesce(fine_charged, 0) limit 1`;
+    if (overpaid) throw new Refused(`Voucher #${overpaid.id} already has more paid than the new bill. Reverse the receipt before reducing the fee.`);
     // A lower fee may mean what was already paid now covers the month.
     await db`
       update fees set status = case

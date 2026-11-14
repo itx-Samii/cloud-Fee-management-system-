@@ -9,11 +9,15 @@ export async function GET() {
 
   try {
     const license = await getLicense(session.schoolId);
+    // Parents only need to know whether the portal is open, not the school's license details.
+    if (session.role === 'parent') {
+      return NextResponse.json({ status: license.status, features: license.features }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     // Not cached by the browser, so a feature the Super Admin switches back on shows up at once.
     return NextResponse.json(license, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     console.error(`License lookup failed for ${session.schoolId}:`, err);
     // Don't lock the school out of the UI just because the lookup failed; the APIs still enforce blocks.
-    return NextResponse.json({ status: 'active', clientName: 'School System', maxStudents: 1000, features: DEFAULT_FEATURES });
+    return NextResponse.json({ status: 'active', clientName: 'School System', maxStudents: 1000, features: DEFAULT_FEATURES }, { headers: { 'Cache-Control': 'no-store' } });
   }
 }

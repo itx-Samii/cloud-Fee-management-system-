@@ -6,14 +6,13 @@ interface Props {
   settings: FeeSettings & { lateFineOn?: boolean };
   canEdit: boolean;
   onSave: (changes: Partial<FeeSettings>) => Promise<boolean>;
-  inputStyle: React.CSSProperties;
+  inputStyle?: React.CSSProperties;
 }
 
 /**
- * The "due after" and "late fine" boxes of the challan settings. Unlike the rest of the challan
- * settings they apply to the whole school (the server charges the fine), so only principals edit them.
+ * The school's "due after" and "late fine" settings. Only principals can edit them.
  */
-export default function FeeSettingsFields({ settings, canEdit, onSave, inputStyle }: Props) {
+export default function FeeSettingsFields({ settings, canEdit, onSave, inputStyle = {} }: Props) {
   const hint = canEdit ? 'Applies to the whole school' : 'Set by the principal';
   const fineOff = settings.lateFineOn === false;
   return (

@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { exportToCSV } from '@/lib/exportUtils';
 import type { SchoolClass, Student } from '@/lib/types';
 import { yearOptions } from '@/lib/fees';
@@ -29,6 +29,7 @@ export default function ACLedger() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [processing, setProcessing] = useState(false);
+  const collecting = useRef(false);
 
   const fetchData = useCallback(
     () =>
@@ -65,7 +66,7 @@ export default function ACLedger() {
 
   const handleCollect = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudent || !payAmount) return;
+    if (!selectedStudent || !payAmount || collecting.current) return;
     const amount = parseFloat(payAmount);
     if (isNaN(amount) || amount <= 0) {
       alert('Please enter a valid amount.');
@@ -76,37 +77,58 @@ export default function ACLedger() {
       alert(`Amount exceeds remaining balance of Rs. ${remaining}`);
       return;
     }
+    collecting.current = true;
     setProcessing(true);
     try {
-      // Correctly update paidAnnualCharges on the student record
-      const newPaid = (selectedStudent.paidAnnualCharges || 0) + amount;
-      const res = await fetch('/api/students', {
+      const loadVouchers = async () => {
+        const response = await fetch(`/api/fees?studentId=${selectedStudent.id}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Unable to load the student vouchers.');
+        return response.json();
+      };
+      let vouchers = await loadVouchers();
+      if (!vouchers.length) {
+        const now = new Date();
+        const generated = await fetch('/api/fees', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ month: now.toLocaleString('en-US', { month: 'long' }), year: String(now.getFullYear()), studentIds: [selectedStudent.id] }),
+        });
+        if (!generated.ok) throw new Error((await generated.json()).error || 'Generate a voucher before receiving annual charges.');
+        vouchers = await loadVouchers();
+      }
+      if (!vouchers.length) throw new Error('This student has no voucher. Generate one before receiving annual charges.');
+      const pendingKey = `school-ac-payment:${selectedStudent.id}:${amount}`;
+      const pending = sessionStorage.getItem(pendingKey);
+      const request = pending ? JSON.parse(pending) : { id: vouchers[0].id, requestId: crypto.randomUUID() };
+      sessionStorage.setItem(pendingKey, JSON.stringify(request));
+      const payment = { ...request, paidTuition: 0, paidAC: amount };
+      const res = await fetch('/api/fees', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: selectedStudent.id,
-          paidAnnualCharges: newPaid
-        })
+        body: JSON.stringify(payment)
       });
       if (res.ok) {
+        const receipt = await res.json();
+        sessionStorage.removeItem(pendingKey);
         setShowModal(false);
         setPayAmount('');
         await fetchData();
-        alert(`Rs. ${amount} AC installment recorded successfully!`);
+        alert(`Rs. ${amount} AC installment recorded. Receipt #${receipt.receiptNo} is in the Cash Book.`);
       } else {
+        if (res.status < 500) sessionStorage.removeItem(pendingKey);
         const err = await res.json();
         alert(err.error || 'Failed to record payment');
       }
-    } catch {
-      alert('System Error — check your connection');
+    } catch (error) {
+      alert(`${error instanceof Error ? error.message : 'Connection unavailable.'} Check the Cash Book or retry the same amount; retries will not collect twice.`);
     } finally {
+      collecting.current = false;
       setProcessing(false);
     }
   };
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+      <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
         <div>
           <h1>Annual Charges (AC) Ledger</h1>
           <p>Track payments and installments for session-based charges.</p>
@@ -164,7 +186,7 @@ export default function ACLedger() {
       </div>
 
       {/* AC Summary Metrics */}
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem'}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem', marginBottom: '2.5rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
           <span style={{fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Total AC Goal</span>
           <h2 style={{fontSize: '2rem', fontWeight: 800, margin: 0}}>Rs. {filtered.reduce((sum, s) => sum + (parseFloat(String(s.annualCharges)) || 0), 0).toLocaleString()}</h2>
@@ -243,17 +265,17 @@ export default function ACLedger() {
       </div>
 
       {showModal && selectedStudent && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '450px', padding: '2rem'}}>
             <h2 style={{marginBottom: '0.5rem'}}>Collect AC Installment</h2>
             <p style={{marginBottom: '1.5rem', color: 'var(--text-muted)'}}>Student: <strong>{selectedStudent.name}</strong></p>
             
             <div style={{background: '#f8fafc', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid #e2e8f0'}}>
-              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem'}}>
+              <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '0.5rem'}}>
                 <span>Total Yearly AC:</span>
                 <span style={{fontWeight: 600}}>Rs. {selectedStudent.annualCharges}</span>
               </div>
-              <div style={{display: 'flex', justifyContent: 'space-between', color: 'var(--danger)'}}>
+              <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', color: 'var(--danger)'}}>
                 <span>Remaining Balance:</span>
                 <span style={{fontWeight: 700}}>Rs. {(selectedStudent.annualCharges || 0) - (selectedStudent.paidAnnualCharges || 0)}</span>
               </div>

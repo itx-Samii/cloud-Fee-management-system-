@@ -3,7 +3,7 @@ import { STAFF, hasFeature, requireFeature, requireSession } from '@/lib/auth';
 import { audit, describeCharges, rupees } from '@/lib/audit';
 import { getDb } from '@/lib/db';
 import { findAll, findById, insertNewRecords, nothingReceived, toId } from '@/lib/dbHandler';
-import { chargesTotal, classLabel, isLeft, newVoucher, parseCharges, periodLabel, withBalances } from '@/lib/fees';
+import { chargesTotal, classLabel, isLeft, newVoucher, parseCharges, periodLabel, withBalances, withVoucherStudent } from '@/lib/fees';
 import {
   Refused,
   addChargeToVouchers,
@@ -55,18 +55,7 @@ export async function GET(request: Request) {
     const classesById = new Map(classes.map((c) => [String(c.id), c]));
 
     // Some older vouchers only store the studentId; fill in the details for display.
-    let fees = allFees.map((f) => {
-      const student = !f.studentName && f.studentId ? studentsById.get(String(f.studentId)) : undefined;
-      if (!student) return f;
-      return {
-        ...f,
-        studentName: student.name,
-        fatherName: student.fatherName,
-        admissionNumber: student.admissionNumber,
-        className: classLabel(classesById.get(String(student.classId)), student.classId),
-        classId: student.classId,
-      };
-    });
+    let fees = allFees.map((f) => withVoucherStudent(f, studentsById.get(String(f.studentId)), classesById));
 
     if (id) fees = fees.filter((f) => String(f.id) === id);
     if (studentId) fees = fees.filter((f) => String(f.studentId) === studentId);
@@ -170,6 +159,9 @@ export async function PUT(request: Request) {
   const id = toText(body?.id);
   if (!body || !id) return jsonError('Voucher ID required', 400);
 
+  const requestId = toText(body.requestId);
+  if (!requestId || !/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) return jsonError('A valid payment request ID is required', 400);
+
   const paidTuition = toNumber(body.paidTuition);
   const paidAC = toNumber(body.paidAC);
   if (paidTuition < 0 || paidAC < 0) return jsonError('Payment amounts cannot be negative', 400);
@@ -179,6 +171,7 @@ export async function PUT(request: Request) {
 
   try {
     const result = await receivePayment(session, id, {
+      requestId,
       paidTuition,
       paidAC,
       waiveFine: body.waiveFine === true,
@@ -189,29 +182,10 @@ export async function PUT(request: Request) {
     const { receipt, voucher } = result;
 
     const allocations = receipt.allocations ?? [];
-    const months = (lines: typeof allocations) => lines.map((a) => `${periodLabel(a)} ${rupees(a.amount)}`).join(', ');
-    const others = allocations.filter((a) => String(a.voucherId) !== String(voucher.id) && a.amount > 0);
-    const arrears = others.filter((a) => !a.created);
-    const advance = others.filter((a) => a.created);
-    const charged = allocations.reduce((sum, a) => sum + (a.fineCharged ?? 0), 0);
-    const waived = allocations.reduce((sum, a) => sum + (a.fineWaived ?? 0), 0);
-    const notes = [
-      arrears.length ? `incl. arrears ${months(arrears)}` : '',
-      advance.length ? `advance fee ${months(advance)}` : '',
-      charged ? `late fine ${rupees(charged)} charged` : '',
-      waived ? `late fine ${rupees(waived)} waived` : '',
-    ].filter(Boolean);
-    await audit(
-      session,
-      'payment.receive',
-      `Received ${rupees(receipt.amount)} from ${voucher.studentName ?? 'student'} for ${periodLabel(voucher)} ` +
-        `(voucher #${voucher.id}, receipt #${receipt.id})${notes.length ? `; ${notes.join('; ')}` : ''}`
-    );
-
     return NextResponse.json({
       ...(await voucherWithBalance(schoolId, voucher)),
       receiptNo: receipt.id,
-      receivedBy: session.displayName,
+      receivedBy: receipt.receivedByName ?? receipt.receivedBy,
       allocations,
     });
   } catch (err) {
@@ -311,15 +285,7 @@ export async function DELETE(request: Request) {
 
     const reversal = await reverseVoucher(session, id);
     if (!reversal) return jsonError('Voucher not found', 404);
-    const { voucher, takenBack, receipts } = reversal;
-    const what = `voucher #${voucher.id} of ${voucher.studentName ?? 'student'} for ${periodLabel(voucher)}`;
-    await audit(
-      session,
-      'voucher.delete',
-      takenBack > 0 || voucher.status !== 'Unpaid'
-        ? `Reversed ${what}${receipts ? ` (${receipts} receipt(s))` : ''}${takenBack > 0 ? `: ${rupees(takenBack)} taken back` : ''}`
-        : `Deleted unpaid ${what}`
-    );
+    const { takenBack, receipts } = reversal;
     return NextResponse.json({ success: true, takenBack, receipts });
   } catch (err) {
     console.error(`DELETE fees failed for ${schoolId}:`, err);

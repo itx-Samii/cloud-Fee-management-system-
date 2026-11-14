@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
+    "db:local": "tsx scripts/local-db.ts",
+    "offline": "tsx scripts/offline.ts",
+    "offline:dev": "tsx scripts/offline.ts --dev",
+    "offline:setup": "tsx scripts/setup-offline.ts",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint",

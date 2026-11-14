@@ -225,7 +225,7 @@ export default function ClassWiseTracking() {
       const res = await fetch('/api/students', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, name, fatherName, monthlyFee, discount })
+        body: JSON.stringify({ id, name, fatherName, monthlyFee, discount, expectedUpdatedAt: editingStudent.updatedAt ?? null })
       });
       if (res.ok) {
         setShowEditModal(false);
@@ -246,7 +246,7 @@ export default function ClassWiseTracking() {
   const needle = search.trim().toLowerCase();
   const shownRows = trackingData
     .filter(d => statusFilter === 'all' || d.status === statusFilter || (statusFilter === 'Unpaid' && d.status === 'Not Generated'))
-    .filter(d => !needle || [d.studentName, d.fatherName, d.admissionNumber, d.parentPhone, d.voucherId].some(v => String(v ?? '').toLowerCase().includes(needle)));
+    .filter(d => !needle || [d.studentName, d.fatherName, d.admissionNumber, d.parentPhone, d.voucherId, d.rollNumber].some(v => String(v ?? '').toLowerCase().includes(needle)));
 
   return (
     <div>
@@ -261,7 +261,7 @@ export default function ClassWiseTracking() {
               <h2 style={{margin: 0, fontSize: '1.2rem', color: '#000', textTransform: 'uppercase', letterSpacing: '2px'}}>Student Fee Status Report</h2>
             </div>
           </div>
-          <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 600, color: '#000'}}>
+          <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 600, color: '#000'}}>
             <span>Class: {selectedClassObj?.name || 'N/A'} {selectedClassObj?.section ? `(${selectedClassObj.section})` : ''}</span>
             <span>Session: {month} {year}</span>
             <span>Date: {new Date().toLocaleDateString()}</span>
@@ -269,7 +269,7 @@ export default function ClassWiseTracking() {
         </div>
       )}
 
-      <div className="no-print" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem'}}>
+      <div className="no-print" style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem'}}>
         <div>
           <h1 style={{marginBottom: '0.25rem'}}>Class-wise Fee Tracking</h1>
           <p>Monitor defaulters and print customized vouchers for specific classes.</p>
@@ -337,7 +337,7 @@ export default function ClassWiseTracking() {
       </div>
 
       {showConfig && (
-        <div className="glass-panel no-print" style={{padding: '2rem', marginBottom: '2rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', backdropFilter: 'blur(10px)'}}>
+        <div className="glass-panel no-print" style={{padding: '2rem', marginBottom: '2rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '2rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', backdropFilter: 'blur(10px)'}}>
            <div>
               <label className="form-label" style={{fontSize: '0.8rem', color: 'var(--primary)', marginBottom: '0.8rem'}}>BANK NAME</label>
               <input className="form-input" value={bankName} onChange={e => setBankName(e.target.value)} style={{background: 'var(--bg-card)', border: '1px solid var(--border)', height: '50px', fontSize: '1rem'}} />
@@ -435,7 +435,7 @@ export default function ClassWiseTracking() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{width: '80px'}}>Sr No</th>
+              <th style={{width: '80px'}}>Roll No</th>
               <th>Adm No</th>
               <th>Student & Father Name</th>
               <th>Monthly Fee</th>
@@ -453,9 +453,9 @@ export default function ClassWiseTracking() {
             ) : shownRows.length === 0 ? (
               <tr><td colSpan={8} style={{textAlign: 'center', padding: '2rem', color: 'var(--text-muted)'}}>No students in this class match the search or filter.</td></tr>
             ) : (
-              shownRows.map((d, idx) => (
+              shownRows.map((d) => (
                 <tr key={d.id} style={{background: (d.status === 'Unpaid' || d.status === 'Not Generated') ? 'rgba(239, 68, 68, 0.05)' : 'transparent'}}>
-                  <td style={{color: 'var(--text-muted)'}}>#{idx + 1}</td>
+                  <td style={{color: 'var(--text-muted)'}}>{d.rollNumber ?? '-'}</td>
                   <td style={{fontWeight: 700}}>{d.admissionNumber || 'N/A'}</td>
                   <td>
                     <div style={{fontWeight: 600}}>
@@ -515,7 +515,7 @@ export default function ClassWiseTracking() {
 
       {/* Modify Modal */}
       {showEditModal && editingStudent && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '450px', padding: '2rem'}}>
             <h2 style={{marginBottom: '1.5rem'}}>Modify Student & Fee</h2>
             <form onSubmit={handleSaveEdit}>
@@ -586,7 +586,7 @@ export default function ClassWiseTracking() {
 
                          <ChallanBill voucher={f} settings={feeSettings} />
 
-                         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto'}}>
+                         <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto'}}>
                             <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Student Signature</div>
                             <div style={{textAlign: 'center', fontSize: '7pt', width: '120px', borderTop: '0.5pt solid #000', paddingTop: '1mm'}}>Cashier Stamp</div>
                          </div>

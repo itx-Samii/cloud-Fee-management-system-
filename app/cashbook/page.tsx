@@ -145,7 +145,7 @@ export default function CashBook() {
         <div className="badge badge-danger" style={{padding: '1rem', display: 'block', fontSize: '1rem', marginBottom: '2rem'}}>{error}</div>
       )}
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--success)'}}>
           <div className="form-label">Total Collected</div>
           <div style={{fontSize: '1.8rem', fontWeight: 800, color: 'var(--success)'}}>{rupees(total)}</div>
