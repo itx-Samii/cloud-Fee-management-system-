@@ -14,8 +14,13 @@ import {
 import type { AppUser } from '@/lib/types';
 import { encodeSession, sessionCookieOptions, SESSION_COOKIE, type Session } from '@/lib/session';
 import { getSession } from '@/lib/auth';
+import { staffSessionRevision } from '@/lib/staffSessions';
 import { audit } from '@/lib/audit';
 import { jsonError, readBody, toText } from '@/lib/http';
+import { signInParent } from '@/lib/parents';
+import { whatsappNumber } from '@/lib/whatsapp';
+import { getLicenseStatus } from '@/lib/license';
+import { TRIAL_EXPIRED_MESSAGE } from '@/lib/trials';
 
 // Failed attempts per IP + username, kept in this server process: enough to stop password guessing.
 const MAX_FAILURES = 10;
@@ -104,24 +109,61 @@ async function authenticate(username: string, password: string): Promise<LoginRe
 
 export async function POST(request: Request) {
   const body = await readBody(request);
-  const username = toText(body?.username)?.toLowerCase();
+  // The unified form sends an identifier. Existing staff API clients can still send a username.
+  const identifier = toText(body?.identifier);
+  const username = (identifier ?? toText(body?.username))?.toLowerCase();
   const password = toText(body?.password);
-  if (!username || !password) return jsonError('Username and password are required', 400);
+  if (!username || !password) return jsonError(identifier === undefined ? 'Username and password are required' : 'Enter your username or phone number and your password or School PIN.', 400);
+
+  const phone = identifier && /^\+?[0-9\s()-]+$/.test(identifier) ? whatsappNumber(identifier) : null;
+  const schoolId = identifier ? toText(body?.schoolId) : undefined;
+  if (schoolId && !phone) return jsonError('A parent phone number is required to choose a school.', 400);
 
   const ip = (await headers()).get('x-forwarded-for')?.split(',')[0].trim() || 'local';
   const attemptKey = `${ip}:${username}`;
-  if (isLockedOut(attemptKey)) return jsonError('Too many failed attempts. Please wait 15 minutes and try again.', 429);
+  const staffLocked = !schoolId && isLockedOut(attemptKey);
+  const lockoutError = 'Too many failed attempts. Please wait 15 minutes and try again.';
+  if (staffLocked && !phone) return jsonError(lockoutError, 429);
 
   try {
-    const result = await authenticate(username, password);
-    if (!result) {
-      recordFailure(attemptKey);
-      return jsonError('Incorrect username or password', 401);
+    let revision: string | undefined;
+    let result: LoginResult = null;
+    if (!schoolId && !staffLocked) {
+      revision = await staffSessionRevision(username);
+      result = await authenticate(username, password);
+      // Initial password storage and hash upgrades change the revision. Recheck so a concurrent
+      // reset cannot mint a valid session with the old password.
+      if (result && !('error' in result)) {
+        const currentRevision = await staffSessionRevision(username);
+        if (currentRevision !== revision) {
+          revision = currentRevision;
+          result = await authenticate(username, password);
+        }
+      }
     }
-    if ('error' in result) return jsonError(result.error, result.status);
+    if (result && 'error' in result) return jsonError(result.error, result.status);
+
+    if (!result && phone) {
+      const parent = await signInParent(phone, password.replace(/\s/g, ''), schoolId);
+      if ('choose' in parent) return NextResponse.json({ choose: parent.choose });
+      if ('session' in parent) {
+        (await cookies()).set(SESSION_COOKIE, encodeSession(parent.session), sessionCookieOptions);
+        return NextResponse.json({ success: true, user: parent.session });
+      }
+      if (parent.status !== 401) return jsonError(parent.error, parent.status);
+    }
+
+    if (!result) {
+      if (staffLocked) return jsonError(lockoutError, 429);
+      if (!schoolId) recordFailure(attemptKey);
+      return jsonError(identifier === undefined ? 'Incorrect username or password' : 'Sign-in details are incorrect. Check your username or phone number and your password or School PIN.', 401);
+    }
 
     failures.delete(attemptKey);
-    (await cookies()).set(SESSION_COOKIE, encodeSession(result), sessionCookieOptions);
+    if (result.role !== 'superadmin' && await getLicenseStatus(result.schoolId) === 'expired') {
+      return jsonError(TRIAL_EXPIRED_MESSAGE, 403);
+    }
+    (await cookies()).set(SESSION_COOKIE, encodeSession({ ...result, revision }), sessionCookieOptions);
     if (result.role !== 'superadmin') {
       const local = ['local', '::1', '127.0.0.1', '::ffff:127.0.0.1'].includes(ip);
       await audit(result, 'login', local ? 'Signed in on the server computer' : `Signed in from ${ip}`);

@@ -174,7 +174,7 @@ export default function SalaryManagement() {
   return (
     <>
     <div className={slip ? 'no-print' : undefined} style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem'}}>
+      <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem'}}>
         <div>
           <h1>Staff & Salary Management</h1>
           <p>Manage school employees and process monthly payroll.</p>
@@ -218,7 +218,7 @@ export default function SalaryManagement() {
 
       {tab === 'directory' ? (
         <div className="glass-panel" style={{padding: '1.5rem'}}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+          <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
             <h3>Active Staff List</h3>
             <button className="btn btn-primary" onClick={() => { setEditingId(null); setShowStaffModal(true); }}>+ Add Employee</button>
           </div>
@@ -377,7 +377,7 @@ export default function SalaryManagement() {
       )}
 
       {showStaffModal && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '450px', padding: '2rem'}}>
             <h2 style={{marginBottom: '1.5rem'}}>{editingId ? 'Edit Employee' : 'Add New Employee'}</h2>
             <form onSubmit={handleSaveStaff}>
@@ -409,17 +409,17 @@ export default function SalaryManagement() {
 
       {/* Salary Process Modal */}
       {showPayModal && payingStaff && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '400px', padding: '2rem'}}>
             <h2 style={{marginBottom: '0.5rem'}}>Process Payroll</h2>
             <p style={{marginBottom: '1.5rem', fontSize: '0.9rem'}}>Paying <strong>{payingStaff.name}</strong> for {selectedMonth} {selectedYear}.</p>
 
             <div style={{background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem'}}>
-               <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
+               <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '1rem'}}>
                  <span style={{color: 'var(--text-muted)'}}>Basic Salary:</span>
                  <span style={{fontWeight: 600}}>Rs. {payingStaff.salary}</span>
                </div>
-               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+               <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center'}}>
                  <span style={{color: 'var(--text-muted)'}}>Rate per Off (Rs.):</span>
                  <input
                    type="number"
@@ -443,11 +443,11 @@ export default function SalaryManagement() {
             </div>
 
             <div style={{marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px dashed var(--border)'}}>
-               <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
+               <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: '1rem'}}>
                  <span style={{fontWeight: 600}}>Total Deduction:</span>
                  <span style={{color: 'var(--danger)', fontWeight: 700}}>- Rs. {parseFloat(offs || '0') * parseFloat(customRate || '0')}</span>
                </div>
-               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+               <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center'}}>
                  <span style={{fontWeight: 700, fontSize: '1.1rem'}}>Net Payable:</span>
                  <span style={{color: 'var(--primary)', fontWeight: 800, fontSize: '1.3rem'}}>Rs. {payingStaff.salary - (parseFloat(offs || '0') * parseFloat(customRate || '0'))}</span>
                </div>
@@ -465,7 +465,7 @@ export default function SalaryManagement() {
 
       {/* Reverse Confirmation Modal */}
       {showReverseModal && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '380px', padding: '2rem', border: '1px solid var(--danger)'}}>
             <h3 style={{color: 'var(--danger)', marginBottom: '1rem'}}>Reverse Payment?</h3>
             <p style={{marginBottom: '2rem', fontSize: '0.9rem'}}>
@@ -508,7 +508,7 @@ export default function SalaryManagement() {
               ))}
             </tbody>
           </table>
-          <div style={{display: 'flex', justifyContent: 'space-between', marginTop: '3rem', fontSize: '0.85rem'}}>
+          <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: '3rem', fontSize: '0.85rem'}}>
             <div style={{borderTop: '1px solid #0f172a', paddingTop: '0.3rem', width: '40%', textAlign: 'center'}}>Received by (employee)</div>
             <div style={{borderTop: '1px solid #0f172a', paddingTop: '0.3rem', width: '40%', textAlign: 'center'}}>Principal / Accountant</div>
           </div>

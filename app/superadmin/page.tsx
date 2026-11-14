@@ -2,6 +2,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { reloadTo } from '@/lib/reloadTo';
 import { DEFAULT_FEATURES, FEATURES, FEATURE_KEYS, featureOn, type Features } from '@/lib/features';
+import SignupRequests from './SignupRequests';
+import TrialLicenseFields, { type TrialAction } from './TrialLicenseFields';
+import { formatTrialExpiry } from '@/lib/trials';
 
 const FEATURE_GROUPS = ['Modules', 'Fee options', 'Tools'] as const;
 
@@ -10,7 +13,9 @@ interface SaaSClient {
   schoolId: string;
   clientName: string;
   licenseKey: string;
-  status: string;
+  status: 'active' | 'blocked' | 'expired';
+  trialExpiresAt?: string;
+  trialDaysRemaining?: number;
   maxStudents: number;
   currentStudents: number;
   features?: Partial<Features>;
@@ -37,6 +42,9 @@ export default function SuperAdminPage() {
   const [maxStudents, setMaxStudents] = useState('1000');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [trialAction, setTrialAction] = useState<TrialAction>('keep');
+  const [trialDays, setTrialDays] = useState('14');
+  const [savingLicense, setSavingLicense] = useState(false);
 
   // Edit Modal State
   const [showEditModal, setShowEditModal] = useState(false);
@@ -45,6 +53,8 @@ export default function SuperAdminPage() {
   const [editLicenseKey, setEditLicenseKey] = useState('');
   const [editMaxStudents, setEditMaxStudents] = useState('1000');
   const [editAdminPassword, setEditAdminPassword] = useState('');
+  const [editTrialAction, setEditTrialAction] = useState<TrialAction>('keep');
+  const [editTrialDays, setEditTrialDays] = useState('14');
 
   // Feature Permissions Modal State
   const [showFeatureModal, setShowFeatureModal] = useState(false);
@@ -62,18 +72,22 @@ export default function SuperAdminPage() {
 
   useEffect(() => {
     fetchClients();
+    const interval = setInterval(fetchClients, 60_000);
+    return () => clearInterval(interval);
   }, [fetchClients]);
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingLicense) return;
     setError('');
     setSuccess('');
+    setSavingLicense(true);
 
     try {
       const res = await fetch('/api/superadmin/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientName, licenseKey, maxStudents, adminUsername: adminUsername || 'admin', adminPassword })
+        body: JSON.stringify({ clientName, licenseKey, maxStudents, adminUsername: adminUsername || 'admin', adminPassword, trialDays: trialAction === 'trial' ? Number(trialDays) : undefined })
       });
 
       const data = await res.json();
@@ -84,29 +98,37 @@ export default function SuperAdminPage() {
         setLicenseKey('');
         setAdminUsername('');
         setAdminPassword('');
+        setTrialAction('keep');
+        setTrialDays('14');
         fetchClients();
       } else {
         setError(data.error || 'Failed to create SaaS client.');
       }
     } catch {
       setError('System network error.');
+    } finally {
+      setSavingLicense(false);
     }
   };
 
   const openEditModal = (client: SaaSClient) => {
+    setError('');
     setEditingClient(client);
     setEditClientName(client.clientName || '');
     setEditLicenseKey(client.licenseKey || '');
     setEditMaxStudents(!client.maxStudents || isNaN(client.maxStudents) ? '1000' : client.maxStudents.toString());
     setEditAdminPassword('');
+    setEditTrialAction('keep');
+    setEditTrialDays('14');
     setShowEditModal(true);
   };
 
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingClient) return;
+    if (!editingClient || savingLicense) return;
     setError('');
     setSuccess('');
+    setSavingLicense(true);
 
     try {
       const res = await fetch('/api/superadmin/clients', {
@@ -117,7 +139,9 @@ export default function SuperAdminPage() {
           clientName: editClientName,
           maxStudents: editMaxStudents,
           licenseKey: editLicenseKey,
-          adminPassword: editAdminPassword
+          adminPassword: editAdminPassword,
+          trialDays: editTrialAction === 'keep' ? undefined : editTrialAction === 'regular' ? null : Number(editTrialDays),
+          expectedTrialExpiry: editingClient.trialExpiresAt ?? null,
         })
       });
 
@@ -129,9 +153,15 @@ export default function SuperAdminPage() {
         fetchClients();
       } else {
         setError(data.error || 'Failed to modify SaaS client.');
+        if (res.status === 409) {
+          setShowEditModal(false);
+          fetchClients();
+        }
       }
     } catch {
       setError('System network error.');
+    } finally {
+      setSavingLicense(false);
     }
   };
 
@@ -207,27 +237,17 @@ export default function SuperAdminPage() {
   };
 
   const activeCount = clients.filter(c => c.status === 'active').length;
-  const blockedCount = clients.filter(c => c.status === 'blocked').length;
+  const blockedCount = clients.length - activeCount;
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1250px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
-      {/* Header Banner */}
-      <div className="glass-panel" style={{ background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%)', border: '1px solid rgba(245, 158, 11, 0.4)', padding: '2rem 2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+    <div className="workspace-dashboard">
+      <header className="workspace-dashboard-hero glass-panel">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-            <span style={{ padding: '0.25rem 0.75rem', background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              SAAS CLOUD MASTER CONTROLLER
-            </span>
-            <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>v14.8 Enterprise Engine</span>
-          </div>
-          <h1 style={{ fontSize: '2.25rem', fontWeight: 800, margin: 0, color: 'white', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span>🌍</span> Client Software Licensing & SaaS Portal
-          </h1>
-          <p style={{ margin: '0.5rem 0 0', color: '#cbd5e1', fontSize: '1rem', maxWidth: '650px' }}>
-            As the Super Admin (Software Developer & Owner), you have master cutoff capability over all distributed client school instances.
-          </p>
+          <p className="workspace-eyebrow">Administration</p>
+          <h1>Client licenses</h1>
+          <p>Review school signup requests and manage licenses, features, and access.</p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+        <div className="workspace-actions">
           <button
             onClick={() => {
               const oldPass = prompt("Enter Current Super Admin Password:");
@@ -256,25 +276,24 @@ export default function SuperAdminPage() {
               });
             }}
             className="btn btn-secondary"
-            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '0.85rem 1.5rem', fontSize: '1.05rem', fontWeight: 700, borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '0.5rem', boxShadow: '0 8px 20px -5px rgba(239, 68, 68, 0.3)' }}
           >
             <span>🔒</span> Change Master Password
           </button>
           <button
             onClick={() => {
+              setError('');
               setLicenseKey(`KEY-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${new Date().getFullYear()}`);
               setShowModal(true);
             }}
             className="btn btn-primary"
-            style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderColor: '#b45309', display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 1.5rem', fontSize: '1.05rem', fontWeight: 700, borderRadius: '16px', boxShadow: '0 10px 25px -5px rgba(245, 158, 11, 0.4)' }}
           >
             <span>⚡</span> Issue New License
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Metrics Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem' }}>
         <div className="glass-panel" style={{ padding: '1.5rem 2rem', display: 'flex', alignItems: 'center', gap: '1.5rem', borderLeft: '4px solid #3b82f6' }}>
           <div style={{ width: '64px', height: '64px', borderRadius: '18px', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
             🏫
@@ -317,6 +336,8 @@ export default function SuperAdminPage() {
           {success}
         </div>
       )}
+
+      <SignupRequests onApproved={fetchClients} />
 
       {/* SaaS Clients Table */}
       <div className="glass-panel" style={{ padding: '2rem' }}>
@@ -371,8 +392,12 @@ export default function SuperAdminPage() {
                         boxShadow: c.status === 'active' ? '0 0 10px rgba(34, 197, 94, 0.2)' : '0 0 10px rgba(239, 68, 68, 0.2)'
                       }}>
                         <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: c.status === 'active' ? '#22c55e' : '#ef4444' }}></span>
-                        {c.status === 'active' ? 'ACTIVE (OPERATIONAL)' : 'SUSPENDED / BLOCKED'}
+                        {c.status === 'expired' ? 'Trial expired' : c.status === 'blocked' ? 'Suspended' : c.trialExpiresAt ? 'Trial' : 'Active'}
                       </span>
+                      {c.trialExpiresAt && <p className="trial-client-expiry">
+                        <time dateTime={c.trialExpiresAt}>{formatTrialExpiry(c.trialExpiresAt)}</time> PKT
+                        {c.status === 'active' && <span>{c.trialDaysRemaining} {c.trialDaysRemaining === 1 ? 'day' : 'days'} remaining</span>}
+                      </p>}
                     </td>
                     <td style={{ padding: '1.35rem 1rem', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
                       {new Date(c.createdAt).toLocaleDateString()}
@@ -395,7 +420,7 @@ export default function SuperAdminPage() {
                         >
                           ✏️ Modify
                         </button>
-                        <button
+                        {c.status !== 'expired' && <button
                           onClick={() => handleToggleStatus(c.id, c.status, c.clientName)}
                           className="btn"
                           style={{
@@ -409,7 +434,7 @@ export default function SuperAdminPage() {
                           }}
                         >
                           {c.status === 'active' ? '🚫 Deactivate' : '⚡ Activate'}
-                        </button>
+                        </button>}
                         <button
                           onClick={() => handleDeleteClient(c.id, c.clientName)}
                           className="btn"
@@ -430,20 +455,20 @@ export default function SuperAdminPage() {
 
       {/* Provisioning Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', padding: '2.5rem', border: '1px solid rgba(245, 158, 11, 0.4)', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', borderRadius: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+        <div className="workspace-modal no-print" role="dialog" aria-modal="true" aria-labelledby="issue-license-title" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', maxHeight: 'calc(100dvh - 2rem)', overflowY: 'auto', padding: '2.5rem', border: '1px solid rgba(245, 158, 11, 0.4)', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', borderRadius: '24px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>⚡</span>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Issue School License</h3>
+                <h3 id="issue-license-title" style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Issue School License</h3>
               </div>
-              <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
+              <button onClick={() => setShowModal(false)} disabled={savingLicense} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
             </div>
 
-            <form onSubmit={handleCreateClient} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <form onSubmit={handleCreateClient} aria-busy={savingLicense} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
-                <input
+                <label htmlFor="issue-license-clientname" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
+                <input id="issue-license-clientname"
                   required
                   type="text"
                   placeholder="e.g. Beaconhouse School System"
@@ -456,8 +481,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>PRINCIPAL LOGIN USERNAME</label>
-                <input
+                <label htmlFor="issue-license-adminusername" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>PRINCIPAL LOGIN USERNAME</label>
+                <input id="issue-license-adminusername"
                   required
                   type="text"
                   placeholder="e.g. admin_beaconhouse"
@@ -469,8 +494,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>INITIAL PRINCIPAL PASSWORD</label>
-                <input
+                <label htmlFor="issue-license-adminpassword" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>INITIAL PRINCIPAL PASSWORD</label>
+                <input id="issue-license-adminpassword" autoComplete="new-password"
                   required
                   type="text"
                   placeholder="At least 8 characters"
@@ -483,9 +508,9 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
+                <label htmlFor="issue-license-licensekey" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
+                  <input id="issue-license-licensekey"
                     required
                     type="text"
                     className="form-input"
@@ -506,8 +531,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
-                <input
+                <label htmlFor="issue-license-maxstudents" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
+                <input id="issue-license-maxstudents"
                   type="number"
                   placeholder="1000"
                   className="form-input"
@@ -517,10 +542,13 @@ export default function SuperAdminPage() {
                 />
               </div>
 
+              <TrialLicenseFields action={trialAction} days={trialDays} onAction={setTrialAction} onDays={setTrialDays} />
+              {error && <p className="license-form-error" role="alert">{error}</p>}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem' }}>
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => setShowModal(false)} disabled={savingLicense}
                   className="btn"
                   style={{ padding: '0.85rem 1.5rem', background: 'rgba(255,255,255,0.1)' }}
                 >
@@ -528,10 +556,11 @@ export default function SuperAdminPage() {
                 </button>
                 <button
                   type="submit"
+                  disabled={savingLicense}
                   className="btn btn-primary"
                   style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderColor: '#b45309', padding: '0.85rem 1.75rem', fontWeight: 700, fontSize: '1.05rem', boxShadow: '0 10px 25px -5px rgba(245, 158, 11, 0.4)' }}
                 >
-                  Confirm & Provision License
+                  {savingLicense ? 'Saving…' : 'Confirm & Provision License'}
                 </button>
               </div>
             </form>
@@ -541,20 +570,20 @@ export default function SuperAdminPage() {
 
       {/* Modify / Edit Modal */}
       {showEditModal && editingClient && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', padding: '2.5rem', border: '1px solid rgba(59, 130, 246, 0.4)', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', borderRadius: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+        <div className="workspace-modal no-print" role="dialog" aria-modal="true" aria-labelledby="edit-license-title" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', maxHeight: 'calc(100dvh - 2rem)', overflowY: 'auto', padding: '2.5rem', border: '1px solid rgba(59, 130, 246, 0.4)', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', borderRadius: '24px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>✏️</span>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Modify School License & Profile</h3>
+                <h3 id="edit-license-title" style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Modify School License & Profile</h3>
               </div>
-              <button onClick={() => setShowEditModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
+              <button onClick={() => setShowEditModal(false)} disabled={savingLicense} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.75rem', cursor: 'pointer' }}>×</button>
             </div>
 
-            <form onSubmit={handleUpdateClient} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <form onSubmit={handleUpdateClient} aria-busy={savingLicense} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
-                <input
+                <label htmlFor="edit-license-clientname" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>CLIENT / SCHOOL NAME</label>
+                <input id="edit-license-clientname"
                   required
                   type="text"
                   className="form-input"
@@ -565,8 +594,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
-                <input
+                <label htmlFor="edit-license-licensekey" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>SOFTWARE LICENSE KEY</label>
+                <input id="edit-license-licensekey"
                   required
                   type="text"
                   className="form-input"
@@ -577,8 +606,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
-                <input
+                <label htmlFor="edit-license-maxstudents" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>MAX STUDENTS CAPACITY</label>
+                <input id="edit-license-maxstudents"
                   required
                   type="number"
                   className="form-input"
@@ -592,8 +621,8 @@ export default function SuperAdminPage() {
               </div>
 
               <div>
-                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>RESET PRINCIPAL PASSWORD (OPTIONAL)</label>
-                <input
+                <label htmlFor="edit-license-adminpassword" className="form-label" style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 700 }}>RESET PRINCIPAL PASSWORD (OPTIONAL)</label>
+                <input id="edit-license-adminpassword" autoComplete="new-password"
                   type="text"
                   placeholder="Leave blank to keep unchanged"
                   className="form-input"
@@ -603,10 +632,13 @@ export default function SuperAdminPage() {
                 />
               </div>
 
+              <TrialLicenseFields action={editTrialAction} days={editTrialDays} expiresAt={editingClient.trialExpiresAt} onAction={setEditTrialAction} onDays={setEditTrialDays} />
+              {error && <p className="license-form-error" role="alert">{error}</p>}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem' }}>
                 <button
                   type="button"
-                  onClick={() => setShowEditModal(false)}
+                  onClick={() => setShowEditModal(false)} disabled={savingLicense}
                   className="btn"
                   style={{ padding: '0.85rem 1.5rem', background: 'rgba(255,255,255,0.1)' }}
                 >
@@ -614,10 +646,11 @@ export default function SuperAdminPage() {
                 </button>
                 <button
                   type="submit"
+                  disabled={savingLicense}
                   className="btn btn-primary"
                   style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', borderColor: '#1e40af', padding: '0.85rem 1.75rem', fontWeight: 700, fontSize: '1.05rem', boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.4)' }}
                 >
-                  Save Modifications
+                  {savingLicense ? 'Saving…' : 'Save Modifications'}
                 </button>
               </div>
             </form>
@@ -627,9 +660,9 @@ export default function SuperAdminPage() {
 
       {/* Feature Permissions Modal */}
       {showFeatureModal && featureClient && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+        <div className="workspace-modal no-print" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="glass-panel" style={{ width: '100%', maxWidth: '560px', padding: '2.5rem', border: '1px solid rgba(168, 85, 247, 0.4)', boxShadow: '0 25px 50px rgba(0,0,0,0.7)', borderRadius: '24px', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', flexShrink: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '1.75rem' }}>🧩</span>
                 <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Manage Feature Access</h3>

@@ -13,6 +13,11 @@ beforeAll(resetDatabase);
 beforeEach(signOut);
 
 describe('signing in', () => {
+  it('recognizes principals and the Super Admin on the shared form', async () => {
+    expect(await call(login, 'POST', '/api/auth/login', { identifier: 'admin', password: 'brookfield' })).toMatchObject({ status: 200, data: { user: { role: 'admin' } } });
+    signOut();
+    expect(await call(login, 'POST', '/api/auth/login', { identifier: 'SUPERADMIN', password: process.env.SUPERADMIN_PASSWORD })).toMatchObject({ status: 200, data: { user: { role: 'superadmin' } } });
+  });
   it('lets the principal of a fresh install in with the default password', async () => {
     const res = await call(login, 'POST', '/api/auth/login', { username: 'admin', password: 'brookfield' });
     expect(res.status).toBe(200);
@@ -34,7 +39,7 @@ describe('signing in', () => {
   });
 
   it('lets an accountant in with their own password, whatever the username case', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     await call(addUser, 'POST', '/api/users', { username: 'cashier9', password: 'Cashier#2026', displayName: 'Front Desk' });
     signOut();
     const ok = await call(login, 'POST', '/api/auth/login', { username: 'CASHIER9', password: 'Cashier#2026' });
@@ -70,7 +75,7 @@ describe('sessions', () => {
 
 describe('roles', () => {
   it('keeps accountants out of principal-only actions', async () => {
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(addStudent, 'POST', '/api/students', { name: 'X' })).status).toBe(403);
     expect((await call(activityLog, 'GET', '/api/admin/audit')).status).toBe(403);
     expect((await call(listUsers, 'GET', '/api/users')).status).toBe(403);
@@ -78,12 +83,12 @@ describe('roles', () => {
   });
 
   it('keeps school principals out of the Super Admin area', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(clients, 'GET', '/api/superadmin/clients')).status).toBe(403);
   });
 
   it('requires the current password to set a new one, and enforces the minimum length', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const wrong = await call(changePassword, 'POST', '/api/auth/change-password', { oldPassword: 'nope', newPassword: 'NewPass#2026' });
     expect(wrong.status).toBe(400);
     const short = await call(changePassword, 'POST', '/api/auth/change-password', { oldPassword: 'brookfield', newPassword: 'short' });

@@ -26,14 +26,14 @@ describe('schools (Super Admin)', () => {
   });
 
   it('lists Brook Field on a fresh install', async () => {
-    superAdmin();
+    await superAdmin();
     const clients = (await call(listClients, 'GET', '/api/superadmin/clients')).data;
     expect(clients).toEqual([expect.objectContaining({ schoolId: 'school_brookfield', status: 'active', maxStudents: 1000, currentStudents: 0 })]);
     expect(clients[0].features).toMatchObject({ collection: true, reports: true });
   });
 
   it('creates a school whose principal can sign in to it', async () => {
-    superAdmin();
+    await superAdmin();
     const created = await call(addClient, 'POST', '/api/superadmin/clients', NEW_SCHOOL);
     expect(created.status).toBe(200);
     const schoolId = created.data.client.schoolId;
@@ -48,45 +48,45 @@ describe('schools (Super Admin)', () => {
   });
 
   it('enforces the student limit and switched-off features, and blocks a school', async () => {
-    superAdmin();
+    await superAdmin();
     const school = (await call(listClients, 'GET', '/api/superadmin/clients')).data.find((c: any) => c.licenseKey === NEW_SCHOOL.licenseKey);
 
-    signInAs('admin', school.schoolId, 'gvprincipal');
+    await signInAs('admin', school.schoolId, 'gvprincipal');
     for (const name of ['First', 'Second']) {
       expect((await call(addStudent, 'POST', '/api/students', { name, monthlyFee: 1000 })).status).toBe(200);
     }
     expect((await call(addStudent, 'POST', '/api/students', { name: 'Third', monthlyFee: 1000 })).status).toBe(403);
 
-    superAdmin();
+    await superAdmin();
     const edited = await call(editClient, 'PUT', '/api/superadmin/clients', { id: school.schoolId, status: 'blocked', features: { reports: false } });
     expect(edited.status).toBe(200);
     const after = (await call(listClients, 'GET', '/api/superadmin/clients')).data.find((c: any) => c.schoolId === school.schoolId);
     expect(after).toMatchObject({ status: 'blocked', currentStudents: 2, features: { reports: false, collection: true } });
 
-    signInAs('admin', school.schoolId, 'gvprincipal');
+    await signInAs('admin', school.schoolId, 'gvprincipal');
     expect((await call(license, 'GET', '/api/admin/license')).data).toMatchObject({ status: 'blocked', features: { reports: false } });
     expect((await call(listStudents, 'GET', '/api/students')).status).toBe(403);
   });
 
   it('switches features off for one school, in the APIs and not just the menu', async () => {
-    superAdmin();
+    await superAdmin();
     const school = (await call(listClients, 'GET', '/api/superadmin/clients')).data.find((c: any) => c.licenseKey === NEW_SCHOOL.licenseKey);
     expect(school.features).toMatchObject({ charges: true, advance: true, lateFine: true, cashbook: true, defaulters: true, studentLedger: true, activity: true, whatsapp: true, importStudents: true });
     await call(editClient, 'PUT', '/api/superadmin/clients', { id: school.schoolId, status: 'active', features: {} });
 
     // Set up while everything is on: a late fine, due at once, and a monthly transport charge.
     const principal = () => signInAs('admin', school.schoolId, 'gvprincipal');
-    principal();
+    await principal();
     await call(saveSettings, 'PUT', '/api/settings', { dueDays: 0, lateFine: 300 });
     const [first] = (await call(listStudents, 'GET', '/api/students?limit=10')).data.students;
     expect((await call(editStudent, 'PUT', '/api/students', { id: first.id, monthlyCharges: [{ label: 'Transport', amount: 500 }] })).status).toBe(200);
 
-    superAdmin();
+    await superAdmin();
     const off = { charges: false, advance: false, lateFine: false, cashbook: false, defaulters: false, studentLedger: false, activity: false, importStudents: false, expenses: false };
     await call(editClient, 'PUT', '/api/superadmin/clients', { id: school.schoolId, features: off });
     expect((await call(listClients, 'GET', '/api/superadmin/clients')).data.find((c: any) => c.schoolId === school.schoolId).features).toMatchObject({ ...off, collection: true, generate: true });
 
-    principal();
+    await principal();
     // Extra Charges: new vouchers bill the fee alone, and charges can't be added or set.
     await call(generate, 'POST', '/api/fees', { month: 'October', year: '2026' });
     const [voucher] = (await call(listFees, 'GET', `/api/fees?studentId=${first.id}`)).data;
@@ -120,16 +120,16 @@ describe('schools (Super Admin)', () => {
     expect((await call(addExpense, 'POST', '/api/expenses', { category: 'Bills', amount: 100 })).status).toBe(403);
 
     // A feature is off whenever one it needs is off: no Receive Payment, no advance fee either.
-    superAdmin();
+    await superAdmin();
     await call(editClient, 'PUT', '/api/superadmin/clients', { id: school.schoolId, features: { collection: false } });
-    principal();
+    await principal();
     expect((await call(license, 'GET', '/api/admin/license')).data.features).toMatchObject({ collection: false, advance: true, charges: true });
     expect((await call(pay, 'PUT', '/api/fees', { id: voucher.id, paidTuition: 100, paidAC: 0 })).data.error).toContain('"Receive Payment" is switched off');
     expect((await call(setCharges, 'PATCH', '/api/fees', { id: voucher.id, charges: [{ label: 'Exam', amount: 100 }] })).status).toBe(200);
   });
 
   it('deletes a school with its logins but never Brook Field', async () => {
-    superAdmin();
+    await superAdmin();
     const school = (await call(listClients, 'GET', '/api/superadmin/clients')).data.find((c: any) => c.licenseKey === NEW_SCHOOL.licenseKey);
     expect((await call(deleteClient, 'DELETE', `/api/superadmin/clients?id=${school.schoolId}`)).status).toBe(200);
     expect((await call(deleteClient, 'DELETE', '/api/superadmin/clients?id=school_brookfield')).status).toBe(400);

@@ -13,7 +13,7 @@ let nextName = 1;
 
 /** A new student (fee 3000, annual charges 5000) billed for one month; returns both. */
 async function billedStudent(month = 'October') {
-  signInAs('admin');
+  await signInAs('admin');
   const student = (
     await call(addStudent, 'POST', '/api/students', {
       name: `Student ${nextName++}`,
@@ -33,7 +33,7 @@ const studentDoc = (id: number) => findById<Student>('students', SCHOOL, id);
 
 describe('vouchers', () => {
   it('bills once even when two generate requests arrive together', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const student = (await call(addStudent, 'POST', '/api/students', { name: `Student ${nextName++}`, classId: '1', monthlyFee: 3000 })).data;
     const both = await Promise.all(
       [1, 2].map(() => call(generate, 'POST', '/api/fees', { month: 'November', year: '2026', studentIds: [student.id] }))
@@ -54,7 +54,7 @@ describe('vouchers', () => {
 describe('receiving payments', () => {
   it('issues a numbered receipt for every payment and settles the voucher', async () => {
     const { student, voucher } = await billedStudent();
-    signInAs('accountant');
+    await signInAs('accountant');
 
     const first = await call(pay, 'PUT', '/api/fees', { id: voucher.id, paidTuition: 1000, paidAC: 0 });
     expect(first.status).toBe(200);
@@ -91,7 +91,7 @@ describe('receiving payments', () => {
   it('logs each payment with its receipt number', async () => {
     const { voucher } = await billedStudent();
     const paid = await call(pay, 'PUT', '/api/fees', { id: voucher.id, paidTuition: 3000, paidAC: 0 });
-    signInAs('admin');
+    await signInAs('admin');
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=payment');
     expect(log.data[0].summary).toContain(`receipt #${paid.data.receiptNo}`);
     expect(log.data[0].summary).toContain('Rs. 3,000');
@@ -101,14 +101,14 @@ describe('receiving payments', () => {
 describe('reversing vouchers', () => {
   it('lets only the principal reverse a voucher that has money on it', async () => {
     const { student, voucher } = await billedStudent();
-    signInAs('accountant');
+    await signInAs('accountant');
     await call(pay, 'PUT', '/api/fees', { id: voucher.id, paidTuition: 3000, paidAC: 2000 });
 
     const refused = await call(deleteVoucher, 'DELETE', `/api/fees?id=${voucher.id}`);
     expect(refused.status).toBe(403);
     expect(await voucherById(voucher.id)).toBeDefined();
 
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(deleteVoucher, 'DELETE', `/api/fees?id=${voucher.id}`)).status).toBe(200);
     expect(await voucherById(voucher.id)).toBeUndefined();
     // Annual charges paid through it are owed again, and its receipt stays on file marked reversed.
@@ -123,7 +123,7 @@ describe('reversing vouchers', () => {
 
   it('lets accountants delete a voucher nothing was paid on', async () => {
     const { voucher } = await billedStudent();
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(deleteVoucher, 'DELETE', `/api/fees?id=${voucher.id}`)).status).toBe(200);
     expect(await voucherById(voucher.id)).toBeUndefined();
   });
@@ -143,11 +143,11 @@ describe('student changes', () => {
 
   it('carries a fee change over to unpaid vouchers and logs old and new values', async () => {
     const { student, voucher } = await billedStudent();
-    signInAs('accountant');
+    await signInAs('accountant');
     await call(editStudent, 'PUT', '/api/students', { id: student.id, monthlyFee: 2500 });
     expect((await voucherById(voucher.id)).amount).toBe(2500);
 
-    signInAs('admin');
+    await signInAs('admin');
     const log = await call(activityLog, 'GET', '/api/admin/audit?type=student');
     expect(log.data[0]).toMatchObject({ username: 'cashier1', action: 'student.edit' });
     expect(log.data[0].summary).toContain('monthly fee 3000 → 2500');
@@ -162,7 +162,7 @@ describe('school separation', () => {
     });
     await insertRaw('fees', { id: 888888, schoolId: OTHER_SCHOOL, studentId: 1, month: 'October', year: '2026', amount: 100, status: 'Unpaid' });
 
-    signInAs('admin');
+    await signInAs('admin');
     const receipts = (await call(cashBook, 'GET', `/api/payments?${todayRange()}`)).data;
     expect(receipts.some((r: any) => r.id === 999999)).toBe(false);
     expect((await call(pay, 'PUT', '/api/fees', { id: 888888, paidTuition: 100, paidAC: 0 })).status).toBe(404);
@@ -170,7 +170,7 @@ describe('school separation', () => {
   });
 
   it('rejects a cash book request without a valid date range', async () => {
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(cashBook, 'GET', '/api/payments')).status).toBe(400);
     expect((await call(cashBook, 'GET', '/api/payments?from=2026-01-01&to=2028-01-01')).status).toBe(400);
   });

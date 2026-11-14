@@ -27,6 +27,7 @@ export default function ClassDetails() {
   const [loading, setLoading] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
+  const [editVersion, setEditVersion] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<RecordId | null>(null);
   const [formData, setFormData] = useState({ name: '', fatherName: '', parentPhone: '', admissionNumber: '', monthlyFee: '', discount: '', annualCharges: '0' });
   const [monthlyCharges, setMonthlyCharges] = useState<ChargeDraft[]>([]);
@@ -63,7 +64,6 @@ export default function ClassDetails() {
       name: formData.name,
       fatherName: formData.fatherName,
       parentPhone: formData.parentPhone,
-      admissionNumber: formData.admissionNumber || undefined,
       classId: classId,
       monthlyFee: parseFloat(formData.monthlyFee || '0'),
       discount: parseFloat(formData.discount || '0'),
@@ -71,7 +71,7 @@ export default function ClassDetails() {
       annualCharges: parseFloat(formData.annualCharges || '0'),
       paidAnnualCharges: editingId ? undefined : 0,
       // Editing here leaves enrolment alone; it is changed on the All Students page.
-      ...(editingId ? { id: editingId } : { status: 'Active' })
+      ...(editingId ? { id: editingId, expectedUpdatedAt: editVersion } : { status: 'Active' })
     };
 
     const res = await fetch('/api/students', {
@@ -93,6 +93,7 @@ export default function ClassDetails() {
 
   const handleEditClick = (student: Student) => {
     setEditingId(student.id);
+    setEditVersion(student.updatedAt ?? null);
     setFormData({
       name: student.name || '',
       fatherName: student.fatherName || '',
@@ -118,7 +119,7 @@ export default function ClassDetails() {
         <Link href="/classes" style={{ color: 'var(--primary)', textDecoration: 'none' }}>← Back to Classes</Link>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
           <h1>{classInfo ? `${classInfo.name} ${classInfo.section ? ` - ${classInfo.section}` : ''}` : 'Loading...'}</h1>
           <p>Manage {students.length} students assigned to this class.</p>
@@ -140,7 +141,7 @@ export default function ClassDetails() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{width: '80px'}}>Sr No</th>
+              <th style={{width: '80px'}}>Roll No</th>
               <th>Adm No</th>
               <th>Student & Father Name</th>
               <th>Base Fee</th>
@@ -155,9 +156,9 @@ export default function ClassDetails() {
             ) : students.length === 0 ? (
               <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center' }}>No students found in this class.</td></tr>
             ) : (
-              students.map((s, idx) => (
+              students.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ color: 'var(--text-muted)' }}>#{(page - 1) * 20 + idx + 1}</td>
+                  <td style={{ color: 'var(--text-muted)' }}>{s.rollNumber ?? '-'}</td>
                   <td style={{ fontWeight: 700 }}>{s.admissionNumber || 'N/A'}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{s.name}</div>
@@ -193,7 +194,7 @@ export default function ClassDetails() {
       )}
 
       {showModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
+        <div className="workspace-modal no-print" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
           <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', padding: '2rem', maxHeight: '92vh', overflowY: 'auto' }}>
             <h2 style={{ marginBottom: '1.5rem' }}>{editingId ? 'Modify Student' : `Register to ${classInfo?.name}`}</h2>
             <form onSubmit={handleSaveStudent}>
@@ -211,7 +212,7 @@ export default function ClassDetails() {
               </div>
               <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                 <label className="form-label">Admission Number</label>
-                <input className="form-input" placeholder="e.g. ADM-001" value={formData.admissionNumber} onChange={e => setFormData({ ...formData, admissionNumber: e.target.value })} />
+                <input className="form-input" value={formData.admissionNumber || "Assigned on save"} readOnly />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div className="form-group">

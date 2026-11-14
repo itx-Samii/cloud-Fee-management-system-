@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useFeatures } from '@/lib/useFeatures';
 import type { RecordId, SchoolClass } from '@/lib/types';
 
 type ClassRow = SchoolClass & { studentCount?: number };
@@ -18,6 +19,7 @@ export default function ClassesHub() {
   const [showClassModal, setShowClassModal] = useState(false);
   const [editingId, setEditingId] = useState<RecordId | null>(null);
   const [classForm, setClassForm] = useState({ name: '', section: '' });
+  const { has } = useFeatures();
 
   const fetchClasses = useCallback(
     () => fetchClassList().then(setClasses).catch(() => console.error("Failed to fetch classes")),
@@ -42,12 +44,15 @@ export default function ClassesHub() {
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem'}}>
         <div>
           <h1>Classes Management</h1>
           <p>Organize students into classes and sections.</p>
         </div>
-        <button onClick={() => { setEditingId(null); setClassForm({name:'', section:''}); setShowClassModal(true); }} className="btn btn-primary">+ Create New Class</button>
+        <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap'}}>
+          {has('promotion') && <Link href="/promotion" className="btn btn-secondary" style={{textDecoration: 'none'}}>⬆️ Promote Students</Link>}
+          <button onClick={() => { setEditingId(null); setClassForm({name:'', section:''}); setShowClassModal(true); }} className="btn btn-primary">+ Create New Class</button>
+        </div>
       </div>
 
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem'}}>
@@ -57,8 +62,8 @@ export default function ClassesHub() {
           </div>
         ) : (
           classes.map(c => (
-            <div key={c.id} className="glass-panel" style={{padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem'}}>
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+            <div key={c.id} className="glass-panel" style={{padding: '1.5rem', display: 'flex', flexWrap: 'wrap', flexDirection: 'column', gap: '1rem'}}>
+              <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start'}}>
                 <div>
                   <h2 style={{margin: 0, fontSize: '1.4rem'}}>{c.name}</h2>
                   {c.section && <span className="badge badge-success" style={{marginTop: '0.5rem', display: 'inline-block'}}>{c.section}</span>}
@@ -79,7 +84,7 @@ export default function ClassesHub() {
       </div>
 
       {showClassModal && (
-        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
+        <div className="workspace-modal no-print" style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'}}>
           <div className="glass-panel" style={{width: '100%', maxWidth: '500px', padding: '2rem'}}>
             <h2 style={{marginBottom: '1.5rem'}}>{editingId ? 'Edit Class' : 'Create New Class'}</h2>
             <form onSubmit={async (e) => {

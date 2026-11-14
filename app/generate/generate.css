@@ -1,5 +1,30 @@
 /* Bulk Challan Generation specific styles */
 
+.challan-config, .challan-branding { display: grid; gap: 1rem; }
+.challan-config { padding: clamp(1rem, 3vw, 2rem); margin-bottom: 1.25rem; }
+.challan-branding p { color: var(--text-muted); }
+.challan-branding [role='alert'] { color: var(--danger); }
+.challan-config-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr)); gap: .8rem 1rem; }
+.challan-config-wide { grid-column: 1 / -1; }
+.challan-config-fees { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.challan-config-fees > div { min-width: min(100%, 11rem); }
+.challan-config-logo { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .6rem; }
+.challan-config-logo img { width: 4rem; height: 4rem; object-fit: contain; }
+
+.shared-challan { background: white; color: black; color-scheme: light; }
+.shared-challan :is(h4, p) { color: inherit; }
+.shared-challan .voucher-copy { min-width: 0; overflow-wrap: anywhere; position: relative; }
+.shared-challan .voucher-copy:not(:last-child) { border-right: 1px solid #000; }
+.shared-challan .voucher-content { position: relative; display: flex; flex-direction: column; height: 100%; }
+.shared-challan .logo-watermark { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: min(85%, 250px); height: 250px; object-fit: contain; opacity: .08; pointer-events: none; }
+.shared-challan .copy-header { background: #000; color: #fff; text-align: center; padding: 1mm; margin-bottom: 2mm; font-size: 10pt; font-weight: 900; text-transform: uppercase; }
+.shared-challan .info-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1mm 3mm; margin: 2mm 0; font-size: 8pt; }
+.shared-challan .info-item { display: flex; justify-content: space-between; gap: .3em; border-bottom: .2pt solid #ddd; }
+.shared-challan .info-item span { text-align: right; }
+.shared-challan .challan-table { width: 100%; border-collapse: collapse; margin: 2mm 0; }
+.shared-challan .challan-table :is(th, td) { border: .5pt solid #000; padding: 1mm 2mm; font-size: 8pt; }
+.shared-challan .challan-table th { background: #f1f5f9; }
+
 @media screen {
   .print-only {
     display: none !important;
@@ -7,6 +32,13 @@
 }
 
 @media print {
+  @page school-challan { size: A4 landscape; margin: 5mm; }
+
+  .generate-vouchers { animation: none !important; }
+  .shared-challan { page: school-challan; }
+  .shared-challan.voucher-card:last-child { break-after: auto !important; }
+  .shared-challan .logo-watermark { max-width: 90%; }
+
   .no-print {
     display: none !important;
   }

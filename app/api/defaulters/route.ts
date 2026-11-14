@@ -3,6 +3,7 @@ import { STAFF, requireFeature, requireSession } from '@/lib/auth';
 import { findAll } from '@/lib/dbHandler';
 import { isLeft, studentDues, vouchersByStudent } from '@/lib/fees';
 import { loadFeeSettings } from '@/lib/ledger';
+import { lastReminders } from '@/lib/reminders';
 import { jsonError } from '@/lib/http';
 import type { Defaulter, FeeVoucher, SchoolClass, Student } from '@/lib/types';
 
@@ -11,7 +12,8 @@ export const dynamic = 'force-dynamic';
 /**
  * Everyone with overdue fees, biggest balance first: unpaid tuition on bills past their due date
  * (late fines included) plus outstanding annual charges. Bills not yet due don't count, so the
- * list isn't the whole school on the 1st of the month. ?classId= and ?minMonths= narrow it.
+ * list isn't the whole school on the 1st of the month. ?classId= and ?minMonths= narrow it. Each
+ * row says when the family was last sent a WhatsApp reminder, if in the last 90 days.
  */
 export async function GET(request: Request) {
   const session = await requireSession(STAFF);
@@ -25,13 +27,14 @@ export async function GET(request: Request) {
   const minMonths = Math.max(0, parseInt(params.get('minMonths') || '0') || 0);
 
   try {
-    const [fees, students, classes, { lateFine }] = await Promise.all([
+    const [fees, students, classes, { lateFine }, reminded] = await Promise.all([
       findAll<FeeVoucher>('fees', schoolId),
       findAll<Student>('students', schoolId),
       findAll<SchoolClass>('classes', schoolId),
       loadFeeSettings(schoolId),
+      lastReminders(schoolId),
     ]);
-    const classNames = new Map(classes.map((c) => [String(c.id), `${c.name}${c.section ? ` - ${c.section}` : ''}`]));
+    const classNames = new Map(classes.map((c) => [String(c.id), `${c.name.trim()}${c.section?.trim() ? ` - ${c.section.trim()}` : ''}`]));
     const vouchersOf = vouchersByStudent(fees);
 
     const now = new Date();
@@ -55,6 +58,7 @@ export async function GET(request: Request) {
           annualCharges,
           total: overdue.tuition + annualCharges,
           lastPayment,
+          lastReminder: reminded.get(String(s.id)) ?? null,
         };
       })
       .filter((d) => d.total > 0 && d.months >= minMonths)

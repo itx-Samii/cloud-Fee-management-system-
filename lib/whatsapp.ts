@@ -56,3 +56,56 @@ export function familyReminderMessage(input: { school: string; members: { name: 
     `Kindly pay at the school office or bank at your earliest. If already paid, please ignore this message. Thank you.`
   );
 }
+
+interface Owing {
+  studentId: string | number;
+  name: string;
+  className: string;
+  parentPhone?: string;
+  total: number;
+  months: number;
+  oldestUnpaid: string;
+  lastReminder?: { at: string; by: string } | null;
+}
+
+/** One WhatsApp message to send: a family (everyone on the same number) and what they owe. */
+export interface ReminderBatch<T extends Owing> {
+  number: string;
+  members: T[];
+  total: number;
+  message: string;
+  link: string;
+  /** The family's latest reminder, if any. */
+  lastReminded: string | null;
+}
+
+/**
+ * Defaulters as reminders to send, one message per family (brothers and sisters together), biggest
+ * balance first; plus the students with no usable phone number, who can't be messaged.
+ */
+export function reminderBatches<T extends Owing>(rows: T[], school: string): { batches: ReminderBatch<T>[]; noPhone: T[] } {
+  const families = new Map<string, T[]>();
+  const noPhone: T[] = [];
+  for (const row of rows) {
+    const number = whatsappNumber(row.parentPhone);
+    if (number) families.set(number, [...(families.get(number) ?? []), row]);
+    else noPhone.push(row);
+  }
+  const batches = [...families].map(([number, members]) => {
+    const [first] = members;
+    const message =
+      members.length === 1
+        ? reminderMessage({ school, student: first.name, className: first.className, total: first.total, months: first.months, since: first.oldestUnpaid })
+        : familyReminderMessage({ school, members: members.map((m) => ({ name: m.name, className: m.className, balance: m.total })) });
+    const lastReminded = members.map((m) => m.lastReminder?.at).filter((at): at is string => !!at).sort().pop() ?? null;
+    return {
+      number,
+      members,
+      total: members.reduce((sum, m) => sum + m.total, 0),
+      message,
+      link: `https://wa.me/${number}?text=${encodeURIComponent(message)}`,
+      lastReminded,
+    };
+  });
+  return { batches: batches.sort((a, b) => b.total - a.total), noPhone };
+}

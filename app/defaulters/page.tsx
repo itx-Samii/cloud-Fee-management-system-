@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { exportToCSV } from '@/lib/exportUtils';
 import { useFeeSettings } from '@/lib/useFeeSettings';
 import { useFeatures } from '@/lib/useFeatures';
-import { reminderMessage, whatsappLink } from '@/lib/whatsapp';
+import { reminderBatches, reminderMessage, whatsappLink, whatsappNumber } from '@/lib/whatsapp';
+import ReminderQueue, { daysAgo, recordReminder } from '@/app/components/ReminderQueue';
 import type { Defaulter, SchoolClass } from '@/lib/types';
 
 const rupees = (amount: number) => `Rs. ${amount.toLocaleString('en-US')}`;
@@ -30,6 +31,7 @@ export default function DefaulterList() {
   const [rows, setRows] = useState<Defaulter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reminding, setReminding] = useState(false);
   const { settings } = useFeeSettings();
   const { has } = useFeatures();
   const schoolName = settings.schoolName || 'the school';
@@ -59,6 +61,14 @@ export default function DefaulterList() {
     ? rows.filter((r) => [r.name, r.fatherName, r.admissionNumber].some((v) => String(v ?? '').toLowerCase().includes(needle)))
     : rows;
   const total = shown.reduce((sum, r) => sum + r.total, 0);
+  const families = has('reminders') ? reminderBatches(shown, schoolName).batches.length : 0;
+
+  // Shown straight away; the server keeps the record for the next time the list loads.
+  const markReminded = (studentIds: (string | number)[]) => {
+    const at = new Date().toISOString();
+    const ids = new Set(studentIds.map(String));
+    setRows((list) => list.map((r) => (ids.has(String(r.studentId)) ? { ...r, lastReminder: { at, by: 'you' } } : r)));
+  };
 
   const handleExport = () =>
     exportToCSV(
@@ -111,13 +121,18 @@ export default function DefaulterList() {
           <label className="form-label">Search</label>
           <input className="form-input" style={selectStyle} placeholder="Name, father name or admission no..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+        {has('reminders') && (
+          <button className="btn" style={{background: '#25D366', color: 'white', border: 'none'}} disabled={families === 0} onClick={() => setReminding(true)}>
+            📣 Remind all ({families} famil{families === 1 ? 'y' : 'ies'})
+          </button>
+        )}
         <button className="btn btn-secondary" onClick={handleExport}>Export CSV</button>
         <button className="btn btn-primary" onClick={() => window.print()}>Print</button>
       </div>
 
       {error && <div className="badge badge-danger" style={{padding: '1rem', display: 'block', fontSize: '1rem', marginBottom: '2rem'}}>{error}</div>}
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--danger)'}}>
           <div className="form-label">Total Outstanding</div>
           <div style={{fontSize: '1.8rem', fontWeight: 800, color: 'var(--danger)'}}>{rupees(total)}</div>
@@ -176,14 +191,23 @@ export default function DefaulterList() {
                   </td>
                   <td>{rupees(r.annualCharges)}</td>
                   <td style={{fontWeight: 800, color: 'var(--danger)'}}>{rupees(r.total)}</td>
-                  <td style={{fontSize: '0.85rem'}}>{r.lastPayment ? new Date(r.lastPayment).toLocaleDateString('en-GB') : 'Never'}</td>
+                  <td style={{fontSize: '0.85rem'}}>
+                    {r.lastPayment ? new Date(r.lastPayment).toLocaleDateString('en-GB') : 'Never'}
+                    {r.lastReminder && (
+                      <div className="no-print" style={{fontSize: '0.75rem', color: 'var(--text-muted)'}} title={`by ${r.lastReminder.by}`}>💬 Reminded {daysAgo(r.lastReminder.at)}</div>
+                    )}
+                  </td>
                   <td className="no-print">
                     <div style={{display: 'flex', gap: '0.4rem'}}>
                       {has('studentLedger') && <Link href={`/ledger/${r.studentId}`} className="btn btn-secondary" style={{padding: '0.3rem 0.7rem', fontSize: '0.8rem'}}>Ledger</Link>}
                       {(() => {
                         const link = has('whatsapp') && whatsappLink(r.parentPhone, reminderMessage({ school: schoolName, student: r.name, className: r.className, total: r.total, months: r.months, since: r.oldestUnpaid }));
                         return link ? (
-                          <a href={link} target="_blank" rel="noopener noreferrer" className="btn" style={{padding: '0.3rem 0.7rem', fontSize: '0.8rem', background: '#25D366', color: 'white', border: 'none'}} title={`Send a reminder to ${r.parentPhone}`}>WhatsApp</a>
+                          <a href={link} target="_blank" rel="noopener noreferrer" className="btn" style={{padding: '0.3rem 0.7rem', fontSize: '0.8rem', background: '#25D366', color: 'white', border: 'none'}} title={`Send a reminder to ${r.parentPhone}`}
+                            onClick={() => {
+                              markReminded([r.studentId]);
+                              recordReminder({ number: whatsappNumber(r.parentPhone) as string, studentIds: [r.studentId], total: r.total }, false);
+                            }}>WhatsApp</a>
                         ) : null;
                       })()}
                     </div>
@@ -194,6 +218,7 @@ export default function DefaulterList() {
           </tbody>
         </table>
       </div>
+      {reminding && <ReminderQueue rows={shown} school={schoolName} onSent={markReminded} onClose={() => setReminding(false)} />}
     </div>
   );
 }

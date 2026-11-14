@@ -41,6 +41,7 @@ export default function FeeCollection() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const paymentInFlight = useRef(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const [paidTuition, setPaidTuition] = useState<string>('');
@@ -175,22 +176,30 @@ export default function FeeCollection() {
   };
 
   const handlePay = async () => {
-    if (!feeData) return;
+    if (!feeData || paymentInFlight.current) return;
+    paymentInFlight.current = true;
     setProcessing(true);
     try {
+      const payment = {
+        id: feeData.id,
+        paidTuition: parseFloat(paidTuition) || 0,
+        paidAC: parseFloat(paidAC) || 0,
+        waiveFine,
+        advance,
+      };
+      // Keep the same request ID through a lost response or page reload. If storage is
+      // unavailable, stop before sending money rather than lose the ability to retry safely.
+      const pendingKey = `school-payment:${JSON.stringify(payment)}`;
+      const requestId = sessionStorage.getItem(pendingKey) || crypto.randomUUID();
+      sessionStorage.setItem(pendingKey, requestId);
       const res = await fetch('/api/fees', {
         method: 'PUT',
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: feeData.id,
-          paidTuition: parseFloat(paidTuition) || 0,
-          paidAC: parseFloat(paidAC) || 0,
-          waiveFine,
-          advance
-        })
+        body: JSON.stringify({ ...payment, requestId })
       });
       const updated = await res.json();
       if (res.ok) {
+        sessionStorage.removeItem(pendingKey);
         // The server sends the voucher back with fresh balances and the receipt. The printed receipt
         // still lists the arrears and annual charges as they stood, since this payment covered them.
         const waivedArrearsFines = waiveFine ? (feeData.arrears ?? []).reduce((sum, line) => sum + (line.fine ?? 0), 0) : 0;
@@ -208,11 +217,13 @@ export default function FeeCollection() {
         // trigger print wrapper
         setTimeout(() => window.print(), 300);
       } else {
+        if (res.status < 500) sessionStorage.removeItem(pendingKey);
         alert(updated.error);
       }
     } catch {
-      alert("Error processing payment.");
+      alert('Payment confirmation is unavailable. Check the Cash Book, or retry with the same details; a retry will not collect twice.');
     } finally {
+      paymentInFlight.current = false;
       setProcessing(false);
     }
   };
@@ -222,7 +233,7 @@ export default function FeeCollection() {
       <h1 className="no-print">Fee Collection Portal</h1>
       <p className="no-print" style={{marginBottom: '2rem'}}>Scan or enter voucher number / student roll number to receive cash.</p>
 
-      <form onSubmit={handleSearch} className="glass-panel no-print" style={{padding: '2rem', display: 'flex', gap: '1rem', alignItems: 'flex-end', marginBottom: '2rem', position: 'relative'}}>
+      <form onSubmit={handleSearch} className="glass-panel no-print workspace-collection-search" style={{padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end', marginBottom: '2rem', position: 'relative'}}>
         <div style={{flex: 1, position: 'relative'}} ref={dropdownRef}>
           <label className="form-label">Search by Name, Father&apos;s Name, or Voucher ID</label>
           <input
@@ -311,7 +322,7 @@ export default function FeeCollection() {
             </div>
 
             {/* Sub Header (Official Receipt + ID) */}
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
+            <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
                <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
                   <span style={{fontWeight: 800}}>Dated:</span>
                   <span style={{borderBottom: '1px solid #1e3a8a', minWidth: '150px', fontWeight: 600}} contentEditable suppressContentEditableWarning>{new Date().toLocaleDateString()}</span>
@@ -399,7 +410,7 @@ export default function FeeCollection() {
 
 
             {/* Calculation & Signatures */}
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+            <div style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start'}}>
               <div style={{flex: 1}}>
                  <div className="signature-section" style={{marginTop: '20px'}}>
                     <div className="sig-item" contentEditable suppressContentEditableWarning>Accountant</div>

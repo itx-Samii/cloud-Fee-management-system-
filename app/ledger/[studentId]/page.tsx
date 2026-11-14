@@ -5,7 +5,9 @@ import { useParams } from 'next/navigation';
 import { chargesTotal, isLeft, periodLabel, periodOf } from '@/lib/fees';
 import { useFeeSettings } from '@/lib/useFeeSettings';
 import { useFeatures } from '@/lib/useFeatures';
-import { familyReminderMessage, reminderMessage, whatsappLink } from '@/lib/whatsapp';
+import { familyReminderMessage, reminderMessage, whatsappLink, whatsappNumber } from '@/lib/whatsapp';
+import { recordReminder } from '@/app/components/ReminderQueue';
+import ParentPortalAccess from '@/app/components/ParentPortalAccess';
 import type { FamilyMember, FeeVoucher, Payment, Student } from '@/lib/types';
 
 interface Ledger {
@@ -61,20 +63,26 @@ export default function StudentLedger() {
   const siblings = family.filter((m) => String(m.studentId) !== String(student.id));
   const familyTotal = family.reduce((sum, m) => sum + m.balance, 0);
   const school = settings.schoolName || 'the school';
+  const forFamily = siblings.length > 0 && familyTotal > tuitionOwed + annualOwed;
   const reminder = whatsappLink(
     student.parentPhone,
-    siblings.length > 0 && familyTotal > tuitionOwed + annualOwed
+    forFamily
       ? familyReminderMessage({ school, members: family })
       : reminderMessage({ school, student: student.name, className: student.className ?? '', total: tuitionOwed + annualOwed, months: 0, since: '' })
   );
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease-out'}}>
-      <div className="no-print" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
+      <div className="no-print" style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
         <Link href="/defaulters" style={{color: 'var(--text-muted)'}}>← Defaulter list</Link>
         <div style={{display: 'flex', gap: '0.5rem'}}>
           {reminder && has('whatsapp') && tuitionOwed + annualOwed + familyTotal > 0 && (
-            <a href={reminder} target="_blank" rel="noopener noreferrer" className="btn" style={{background: '#25D366', color: 'white', border: 'none'}}>
+            <a href={reminder} target="_blank" rel="noopener noreferrer" className="btn" style={{background: '#25D366', color: 'white', border: 'none'}}
+              onClick={() => recordReminder({
+                number: whatsappNumber(student.parentPhone) as string,
+                studentIds: forFamily ? family.filter((m) => m.balance > 0).map((m) => m.studentId) : [student.id],
+                total: forFamily ? familyTotal : tuitionOwed + annualOwed,
+              }, false)}>
               Remind on WhatsApp
             </a>
           )}
@@ -92,7 +100,7 @@ export default function StudentLedger() {
         {chargesTotal(student.monthlyCharges) > 0 && ` + ${(student.monthlyCharges ?? []).map((c) => `${c.label} ${rupees(c.amount)}`).join(', ')}`}
       </p>
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1.5rem', marginBottom: '2rem'}}>
         <div className="glass-panel" style={{padding: '1.5rem', borderLeft: '4px solid var(--primary)'}}>
           <div className="form-label">Billed (incl. fines)</div>
           <div style={{fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)'}}>{rupees(billed)}</div>
@@ -109,6 +117,10 @@ export default function StudentLedger() {
           <div style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>tuition {rupees(tuitionOwed)} + annual {rupees(annualOwed)}</div>
         </div>
       </div>
+
+      {has('parentPortal') && whatsappNumber(student.parentPhone) && (
+        <ParentPortalAccess key={whatsappNumber(student.parentPhone)} phone={student.parentPhone as string} school={school} canWhatsApp={has('whatsapp')} />
+      )}
 
       {siblings.length > 0 && (
         <>

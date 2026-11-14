@@ -14,7 +14,7 @@ beforeAll(resetDatabase);
 
 describe('payroll', () => {
   it('pays a salary once per month and shows it only in that month', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const member = (await call(addStaff, 'POST', '/api/staff', { name: 'Sana Teacher', salary: 25000, deductionPerOff: 500 })).data;
 
     const pay = (month: string) => call(paySalary, 'POST', '/api/salaries', { staffId: member.id, month, year: '2026', amount: 25000 });
@@ -27,7 +27,7 @@ describe('payroll', () => {
   });
 
   it('keeps salaries already paid when a staff member is removed', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const member = (await call(addStaff, 'POST', '/api/staff', { name: 'Leaving Teacher', salary: 20000 })).data;
     await call(paySalary, 'POST', '/api/salaries', { staffId: member.id, month: 'October', year: '2026', amount: 20000 });
     await call(addExpense, 'POST', '/api/expenses', { category: 'Salary', amount: 1500, description: 'Bonus for Leaving Teacher' });
@@ -39,14 +39,14 @@ describe('payroll', () => {
   });
 
   it('logs salary reversals and expense deletions', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const member = (await call(addStaff, 'POST', '/api/staff', { name: 'Audit Teacher', salary: 18000 })).data;
     const salary = (await call(paySalary, 'POST', '/api/salaries', { staffId: member.id, month: 'August', year: '2026', amount: 18000 })).data;
     const expense = (await call(addExpense, 'POST', '/api/expenses', { category: 'Internet', amount: 4000, description: 'October bill' })).data;
 
-    signInAs('accountant');
+    await signInAs('accountant');
     expect((await call(deleteExpense, 'DELETE', `/api/expenses?id=${expense.id}`)).status).toBe(200);
-    signInAs('admin');
+    await signInAs('admin');
     expect((await call(reverseSalary, 'DELETE', `/api/salaries?id=${salary.id}`)).status).toBe(200);
 
     const log = (await call(activityLog, 'GET', '/api/admin/audit')).data;
@@ -58,7 +58,7 @@ describe('payroll', () => {
 describe('school separation', () => {
   it("never lists or deletes another school's students", async () => {
     await insertRaw('students', { id: 777777, schoolId: OTHER_SCHOOL, name: 'Other School Kid' });
-    signInAs('admin');
+    await signInAs('admin');
     const list = (await call(listStudents, 'GET', '/api/students?limit=1000')).data.students;
     expect(list.some((s: any) => s.name === 'Other School Kid')).toBe(false);
     expect((await call(deleteStudent, 'DELETE', '/api/students?id=777777')).status).toBe(404);
@@ -67,7 +67,7 @@ describe('school separation', () => {
 
 describe('backup and restore', () => {
   it('restores a backup of the same school, receipts included', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const file = (await call(backup, 'GET', '/api/admin/backup')).data;
     expect(file).toMatchObject({ system: 'School Pay ERP', schoolId: SCHOOL });
     expect(Object.keys(file.data)).toContain('payments');
@@ -78,13 +78,13 @@ describe('backup and restore', () => {
   });
 
   it("refuses a backup that belongs to a different school", async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const res = await call(restore, 'POST', '/api/admin/restore', { system: 'School Pay ERP', schoolId: OTHER_SCHOOL, data: { students: [] } });
     expect(res.status).toBe(400);
   });
 
   it('refuses unknown or damaged sections before changing anything', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const unknown = await call(restore, 'POST', '/api/admin/restore', { system: 'School Pay ERP', data: { licenses: [] } });
     expect(unknown.status).toBe(400);
     const damaged = await call(restore, 'POST', '/api/admin/restore', { system: 'School Pay ERP', data: { students: 'oops' } });
@@ -97,7 +97,7 @@ describe('backup and restore', () => {
   });
 
   it('reads a backup made by the MongoDB version: text ids, Mongo _id and leftover fields', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const res = await call(restore, 'POST', '/api/admin/restore', {
       system: 'School Pay ERP',
       schoolId: SCHOOL,
@@ -130,7 +130,7 @@ describe('backup and restore', () => {
   });
 
   it('leaves the data exactly as it was when a restore fails part-way', async () => {
-    signInAs('admin');
+    await signInAs('admin');
     const before = (await call(listStudents, 'GET', '/api/students?limit=1000')).data.total;
     const res = await call(restore, 'POST', '/api/admin/restore', {
       system: 'School Pay ERP',

@@ -26,7 +26,7 @@ type Doc = Record<string, unknown>;
 type Source = Record<string, Doc[]>;
 
 const SOURCE_NAMES = [...BACKUP_COLLECTIONS, 'config', 'licenses', 'audit_log'];
-const APP_TABLES = ['school_settings', 'licenses', 'counters', 'audit_log', ...BACKUP_COLLECTIONS];
+const APP_TABLES = ['school_settings', 'licenses', 'counters', 'audit_log', 'promotions', 'reminders', 'parent_logins', ...BACKUP_COLLECTIONS];
 
 function parseArgs(argv: string[]) {
   const args = { mongo: '', folder: '', replace: false, dryRun: false };

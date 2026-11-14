@@ -1,9 +1,11 @@
 import crypto from 'crypto';
 import type postgres from 'postgres';
-import { getDb, type Db } from './db';
+import { getDb, transaction, type Db } from './db';
 import { cleanCharges } from './fees';
 import { toNumber } from './http';
 import type { RecordId, SchoolConfig } from './types';
+
+export { MIN_PASSWORD_LENGTH, USERNAME_PATTERN, USERNAME_RULES } from './credentials';
 
 export const LEGACY_SCHOOL_ID = 'school_brookfield';
 
@@ -39,6 +41,7 @@ export const TABLES: Record<CollectionName, Record<string, Field>> = {
     fatherName: text(),
     parentPhone: text(),
     admissionNumber: text(),
+    rollNumber: int,
     classId: int,
     monthlyFee: amount(0),
     discount: amount(0),
@@ -82,6 +85,8 @@ export const TABLES: Record<CollectionName, Record<string, Field>> = {
     isACOnly: flag,
   },
   payments: {
+    requestId: text(),
+    requestFingerprint: text(),
     voucherId: { kind: 'int', fallback: () => 0 },
     studentId: int,
     studentName: text(),
@@ -227,11 +232,11 @@ function conditions(db: Db, table: CollectionName, where: Doc) {
 
 const all = (fragments: ReturnType<typeof conditions>, db: Db) => fragments.reduce((acc, f) => db`${acc} ${f}`, db``);
 
-export async function findAll<T>(collection: CollectionName, schoolId: string, where: Doc = {}): Promise<T[]> {
-  const db = await getDb();
-  const rows = await db`
-    select * from ${db(collection)}
-    where school_id = ${schoolId} ${all(conditions(db, collection, where), db)}
+export async function findAll<T>(collection: CollectionName, schoolId: string, where: Doc = {}, db?: Db): Promise<T[]> {
+  const q = db ?? await getDb();
+  const rows = await q`
+    select * from ${q(collection)}
+    where school_id = ${schoolId} ${all(conditions(q, collection, where), q)}
     order by id`;
   return rows as unknown as T[];
 }
@@ -245,9 +250,9 @@ export async function findById<T>(collection: CollectionName, schoolId: string, 
 }
 
 /** Students counted against the license: everyone who hasn't left. */
-export async function countCurrentStudents(schoolId: string): Promise<number> {
-  const db = await getDb();
-  const [{ count }] = await db`select count(*) from students where school_id = ${schoolId} and lower(status) <> 'left'`;
+export async function countCurrentStudents(schoolId: string, db?: Db): Promise<number> {
+  const q = db ?? await getDb();
+  const [{ count }] = await q`select count(*) from students where school_id = ${schoolId} and lower(status) <> 'left'`;
   return count as number;
 }
 
@@ -262,6 +267,30 @@ export async function reserveIds(db: Db, collection: CollectionName, schoolId: s
     on conflict (school_id, name) do update set seq = greatest(counters.seq, ${top}) + ${count}
     returning seq`;
   return (seq as number) - count + 1;
+}
+
+/** Take this before locking student rows or reserving student IDs. The numbering trigger shares it. */
+export async function lockStudentNumbering(db: Db, schoolId: string): Promise<void> {
+  await db`select pg_advisory_xact_lock(hashtext(${`${schoolId}:student-numbering`}))`;
+}
+
+/** Reserve numbers supplied by imported records before the trigger fills blanks in the same batch. */
+async function seedStudentNumbers(db: Db, schoolId: string, docs: Doc[]): Promise<void> {
+  const highest = new Map<string, number>();
+  for (const doc of docs) {
+    const admission = /^ADM-([0-9]{1,9})$/i.exec(String(doc.admissionNumber ?? '').trim());
+    if (admission) highest.set('student-admission', Math.max(highest.get('student-admission') ?? 0, Number(admission[1])));
+    const classId = toId(doc.classId);
+    const roll = toId(doc.rollNumber);
+    if (classId && roll) {
+      const series = `student-roll:${classId}`;
+      highest.set(series, Math.max(highest.get(series) ?? 0, roll));
+    }
+  }
+  const counters = Array.from(highest, ([name, seq]) => ({ schoolId, name, seq }));
+  if (counters.length === 0) return;
+  await db`insert into counters ${db(counters, 'schoolId', 'name', 'seq')}
+    on conflict (school_id, name) do update set seq = greatest(counters.seq, excluded.seq)`;
 }
 
 // Postgres takes at most 65,535 values per statement.
@@ -286,7 +315,12 @@ async function insertRows(db: Db, collection: CollectionName, records: Doc[], sk
 /** Adds records with new ids; returns them as stored. */
 export async function insertRecords<T extends Doc>(collection: CollectionName, schoolId: string, docs: T[], db?: Db): Promise<(T & { id: number })[]> {
   if (docs.length === 0) return [];
+  if (collection === 'students' && !db) return transaction((tx) => insertRecords(collection, schoolId, docs, tx));
   const q = db ?? (await getDb());
+  if (collection === 'students') {
+    await lockStudentNumbering(q, schoolId);
+    await seedStudentNumbers(q, schoolId, docs);
+  }
   const firstId = await reserveIds(q, collection, schoolId, docs.length);
   const records = docs.map((doc, i) => ({ ...doc, schoolId, id: firstId + i }));
   return (await insertRows(q, collection, records, false)) as (T & { id: number })[];
@@ -358,10 +392,12 @@ export function checkRestoreSection(collection: CollectionName, docs: Doc[]): st
  * one get new ids). Run it inside a transaction; check the sections with checkRestoreSection first.
  */
 export async function replaceSections(tx: Db, schoolId: string, sections: [CollectionName, Doc[]][]): Promise<void> {
+  if (sections.some(([collection]) => collection === 'students')) await lockStudentNumbering(tx, schoolId);
   for (const [collection, docs] of sections) {
     await tx`delete from ${tx(collection)} where school_id = ${schoolId}`;
     let nextId = docs.reduce((max, doc) => Math.max(max, toId(doc.id) ?? 0), 0) + 1;
     const records = docs.map((doc) => ({ ...doc, schoolId, id: toId(doc.id) ?? nextId++ }));
+    if (collection === 'students') await seedStudentNumbers(tx, schoolId, records);
     await insertRows(tx, collection, records, false);
   }
 }
@@ -379,7 +415,6 @@ export async function replaceAll(schoolId: string, sections: [CollectionName, Do
 
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 64;
-export const MIN_PASSWORD_LENGTH = 8;
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(SALT_LENGTH).toString('hex');
@@ -413,18 +448,16 @@ export function verifyPassword(password: string, stored: unknown): boolean {
 // --- Usernames ---
 
 const RESERVED_USERNAMES = ['admin', 'superadmin'];
-export const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
-export const USERNAME_RULES = 'Username must be 3-32 characters: letters, numbers, dots, dashes or underscores.';
 
 /**
  * Login doesn't ask which school you belong to, so a username may exist only once across all
  * schools: among principals (school settings), staff users, and the reserved names.
  */
-export async function isUsernameTaken(username: string, except?: { schoolId: string; id: RecordId }): Promise<boolean> {
+export async function isUsernameTaken(username: string, except?: { schoolId: string; id: RecordId }, runner?: Db): Promise<boolean> {
   const name = username.toLowerCase();
   if (RESERVED_USERNAMES.includes(name)) return true;
 
-  const db = await getDb();
+  const db = runner ?? await getDb();
   const exceptId = except ? toId(except.id) : null;
   const [taken] = await db`
     select 1 from school_settings where admin_username = ${name} or school_id = ${`school_${name}`}

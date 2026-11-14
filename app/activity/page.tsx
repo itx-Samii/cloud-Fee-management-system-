@@ -16,6 +16,7 @@ const TYPES = [
   { value: 'salary', label: 'Salaries' },
   { value: 'staff', label: 'Staff' },
   { value: 'user', label: 'User logins' },
+  { value: 'parent', label: 'Parent portal logins' },
   { value: 'login', label: 'Sign-ins' },
   { value: 'password', label: 'Password changes' },
   { value: 'backup', label: 'Backups & restores' },
@@ -23,7 +24,7 @@ const TYPES = [
 ];
 
 // Actions that move money backwards or remove records stand out in red.
-const WARNING_ACTIONS = ['payment.reverse', 'voucher.delete', 'student.delete', 'expense.delete', 'salary.reverse', 'staff.delete', 'class.delete', 'user.delete', 'backup.restore'];
+const WARNING_ACTIONS = ['payment.reverse', 'voucher.delete', 'student.delete', 'expense.delete', 'salary.reverse', 'staff.delete', 'class.delete', 'user.delete', 'parent.remove', 'backup.restore'];
 
 async function fetchEntries(type: string, before?: string): Promise<AuditEntry[]> {
   const params = new URLSearchParams({ limit: String(PAGE_SIZE) });

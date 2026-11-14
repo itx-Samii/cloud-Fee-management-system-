@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ADMIN, STAFF, requireFeature, requireSession } from '@/lib/auth';
-import { audit, rupees } from '@/lib/audit';
 import { getDb } from '@/lib/db';
 import { findAll } from '@/lib/dbHandler';
-import { periodLabel } from '@/lib/fees';
 import { reverseReceipt } from '@/lib/ledger';
 import { jsonError } from '@/lib/http';
 import type { Payment } from '@/lib/types';
@@ -65,11 +63,6 @@ export async function DELETE(request: Request) {
   try {
     const receipt = await reverseReceipt(session, id);
     if (!receipt) return jsonError('Receipt not found, or already reversed', 404);
-    await audit(
-      session,
-      'payment.reverse',
-      `Reversed receipt #${receipt.id}: ${rupees(receipt.amount)} from ${receipt.studentName ?? 'student'} for ${periodLabel(receipt)}`
-    );
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error(`DELETE payment failed for ${session.schoolId}:`, err);

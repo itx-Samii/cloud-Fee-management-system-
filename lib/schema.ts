@@ -9,6 +9,62 @@
 // read anything, while the app, connecting as the database owner, is not affected by it.
 
 export const SCHEMA_SQL = /* sql */ `
+create table if not exists staff_session_revisions (
+  username text primary key,
+  revision bigint not null default 1
+);
+alter table staff_session_revisions enable row level security;
+
+create or replace function revoke_staff_session(login_name text) returns void language plpgsql as $$
+begin
+  if login_name is not null and login_name <> '' then
+    insert into staff_session_revisions (username) values (lower(login_name))
+    on conflict (username) do update set revision = staff_session_revisions.revision + 1;
+  end if;
+end;
+$$;
+
+create or replace function revoke_changed_user_sessions() returns trigger language plpgsql as $$
+begin
+  if TG_OP = 'DELETE' then
+    perform revoke_staff_session(OLD.username);
+    return OLD;
+  end if;
+  if (OLD.username, OLD.password, OLD.role, OLD.status, OLD.school_id)
+      is distinct from (NEW.username, NEW.password, NEW.role, NEW.status, NEW.school_id) then
+    perform revoke_staff_session(OLD.username);
+    if OLD.username is distinct from NEW.username then
+      perform revoke_staff_session(NEW.username);
+    end if;
+  end if;
+  return NEW;
+end;
+$$;
+
+create or replace function revoke_changed_principal_sessions() returns trigger language plpgsql as $$
+begin
+  if TG_OP = 'UPDATE' then
+    if (OLD.admin_username, OLD.admin_password, OLD.super_admin_password)
+        is not distinct from (NEW.admin_username, NEW.admin_password, NEW.super_admin_password) then
+      return NEW;
+    end if;
+  end if;
+  if TG_OP <> 'INSERT' then
+    perform revoke_staff_session(OLD.admin_username);
+    if OLD.school_id = 'master' then perform revoke_staff_session('superadmin'); end if;
+    if OLD.school_id = 'school_brookfield' then perform revoke_staff_session('admin'); end if;
+    if OLD.school_id like 'school_%' then perform revoke_staff_session(substring(OLD.school_id from 8)); end if;
+  end if;
+  if TG_OP <> 'DELETE' then
+    perform revoke_staff_session(NEW.admin_username);
+    if NEW.school_id = 'master' then perform revoke_staff_session('superadmin'); end if;
+    if NEW.school_id = 'school_brookfield' then perform revoke_staff_session('admin'); end if;
+    if NEW.school_id like 'school_%' then perform revoke_staff_session(substring(NEW.school_id from 8)); end if;
+    return NEW;
+  end if;
+  return OLD;
+end;
+$$;
 create table if not exists school_settings (
   school_id            text primary key,
   admin_username       text,
@@ -52,6 +108,11 @@ create table if not exists users (
   primary key (school_id, id)
 );
 create unique index if not exists users_username on users (lower(username));
+
+create or replace trigger users_revoke_sessions after update or delete on users
+for each row execute function revoke_changed_user_sessions();
+create or replace trigger principals_revoke_sessions after insert or update or delete on school_settings
+for each row execute function revoke_changed_principal_sessions();
 
 create table if not exists classes (
   school_id      text not null,
@@ -200,6 +261,52 @@ create index if not exists audit_log_school_at on audit_log (school_id, at desc)
 alter table fees     add column if not exists charges         jsonb;
 alter table students add column if not exists monthly_charges jsonb;
 
+-- Each class promotion (new session), with every student's class, fee and status before and after,
+-- so the latest one can be undone.
+create table if not exists promotions (
+  id           bigint generated always as identity primary key,
+  school_id    text not null,
+  done_at      timestamptz not null default now(),
+  done_by      text not null,
+  done_by_name text,
+  summary      text not null,
+  -- [{studentId, name, from: {classId, monthlyFee, annualCharges, status, leftAt}, to: {...}}]
+  moves        jsonb not null,
+  undone_at    timestamptz,
+  undone_by    text
+);
+create index if not exists promotions_school on promotions (school_id, id desc);
+
+-- Fee reminders opened in WhatsApp, one row per family message, so staff can see who was reminded
+-- lately and not message a family twice.
+create table if not exists reminders (
+  id           bigint generated always as identity primary key,
+  school_id    text not null,
+  sent_at      timestamptz not null default now(),
+  sent_by      text not null,
+  sent_by_name text,
+  phone        text not null,
+  -- [studentId, ...]: the brothers and sisters the message was about.
+  student_ids  jsonb not null,
+  amount       numeric(12,2) not null default 0
+);
+create index if not exists reminders_school_sent on reminders (school_id, sent_at desc);
+
+-- Parent portal logins: one per family (parent phone, in WhatsApp form 923001234567) per school.
+-- The PIN is hashed like passwords; failed tries lock the login for a while. Never in backups.
+create table if not exists parent_logins (
+  school_id     text not null,
+  phone         text not null,
+  pin           text not null,
+  pin_set_at    timestamptz not null default now(),
+  pin_set_by    text not null,
+  last_login_at timestamptz,
+  failed_logins integer not null default 0,
+  locked_until  timestamptz,
+  primary key (school_id, phone)
+);
+create index if not exists parent_logins_phone on parent_logins (phone);
+
 alter table school_settings  enable row level security;
 alter table licenses         enable row level security;
 alter table counters         enable row level security;
@@ -212,4 +319,127 @@ alter table expenses         enable row level security;
 alter table staff            enable row level security;
 alter table salaries_history enable row level security;
 alter table audit_log        enable row level security;
+alter table promotions       enable row level security;
+alter table reminders        enable row level security;
+alter table parent_logins    enable row level security;
+
+alter table payments add column if not exists request_id text;
+alter table payments add column if not exists request_fingerprint text;
+create unique index if not exists payments_request_id on payments (school_id, request_id) where request_id is not null;
+
+alter table students add column if not exists roll_number integer;
+create unique index if not exists students_class_roll on students (school_id, class_id, roll_number)
+  where roll_number is not null;
+create index if not exists students_admission_lookup on students (school_id, upper(btrim(admission_number)));
+
+-- Continue any existing ADM series and preserve all supplied legacy admission numbers.
+insert into counters (school_id, name, seq)
+select school_id, 'student-admission', max(substring(btrim(admission_number) from 5)::int)
+from students where btrim(admission_number) ~* '^ADM-[0-9]{1,9}$' group by school_id
+on conflict (school_id, name) do update set seq = excluded.seq where counters.seq < excluded.seq;
+
+create or replace function next_student_number(tenant text, series text, last_used integer default 0)
+returns integer language sql as $$
+  insert into counters (school_id, name, seq) values (tenant, series, last_used + 1)
+  on conflict (school_id, name) do update set seq = greatest(counters.seq, last_used) + 1
+  returning seq;
+$$;
+
+create or replace function assign_student_numbers() returns trigger language plpgsql as $$
+declare
+  issued integer;
+begin
+  perform pg_advisory_xact_lock(hashtext(NEW.school_id || ':student-numbering'));
+
+  if nullif(btrim(NEW.admission_number), '') is null then
+    loop
+      issued := next_student_number(NEW.school_id, 'student-admission');
+      NEW.admission_number := 'ADM-' || lpad(issued::text, greatest(5, length(issued::text)), '0');
+      exit when not exists (select 1 from students where school_id = NEW.school_id
+        and upper(btrim(admission_number)) = NEW.admission_number);
+    end loop;
+  end if;
+
+  if TG_OP = 'UPDATE' then
+    if NEW.class_id is distinct from OLD.class_id then NEW.roll_number := null; end if;
+  end if;
+  if NEW.class_id is null then
+    NEW.roll_number := null;
+  elsif NEW.roll_number is null then
+    NEW.roll_number := next_student_number(NEW.school_id, 'student-roll:' || NEW.class_id, (
+      select coalesce(max(roll_number), 0) from students where school_id = NEW.school_id and class_id = NEW.class_id
+    ));
+  end if;
+  return NEW;
+end;
+$$;
+
+create or replace trigger students_assign_numbers before insert or update of class_id, admission_number, roll_number on students
+for each row execute function assign_student_numbers();
+
+-- Give existing students missing identifiers numbers in their original registration order.
+do $$
+declare
+  student record;
+begin
+  for student in select school_id, id from students
+    where nullif(btrim(admission_number), '') is null or (class_id is not null and roll_number is null)
+    order by school_id, id
+  loop
+    update students set admission_number = admission_number, roll_number = roll_number
+    where school_id = student.school_id and id = student.id;
+  end loop;
+end;
+$$;
+
+create table if not exists school_signup_requests (
+  id             uuid primary key,
+  school_name    text not null,
+  school_address text not null,
+  principal_name text not null,
+  email          text not null,
+  phone          text not null,
+  username       text not null,
+  password_hash  text,
+  status         text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at     timestamptz not null default now(),
+  reviewed_at    timestamptz,
+  school_id      text,
+  check ((status = 'pending') = (password_hash is not null)),
+  check ((status = 'pending') = (reviewed_at is null)),
+  check ((status = 'approved') = (school_id is not null))
+);
+create unique index if not exists school_signup_pending_username on school_signup_requests (username) where status = 'pending';
+create index if not exists school_signup_created on school_signup_requests (created_at desc, id);
+alter table school_signup_requests enable row level security;
+
+-- Principal and staff logins use the same username namespace across these two tables.
+create or replace function prevent_shared_login_name() returns trigger language plpgsql as $$
+declare login_name text;
+begin
+  if TG_TABLE_NAME = 'users' then
+    login_name := lower(NEW.username);
+    if TG_OP = 'UPDATE' and lower(OLD.username) is not distinct from login_name then return NEW; end if;
+  else
+    login_name := lower(NEW.admin_username);
+    if TG_OP = 'UPDATE' and lower(OLD.admin_username) is not distinct from login_name then return NEW; end if;
+  end if;
+  if login_name is null then return NEW; end if;
+
+  perform pg_advisory_xact_lock(hashtext('staff-login-name'), hashtext(login_name));
+  if (TG_TABLE_NAME = 'users' and exists (select 1 from school_settings where admin_username = login_name))
+    or (TG_TABLE_NAME = 'school_settings' and exists (select 1 from users where lower(username) = login_name)) then
+    raise unique_violation using message = 'Username is already in use', constraint = 'staff_login_name_unique';
+  end if;
+  return NEW;
+end;
+$$;
+create or replace trigger users_check_login_name before insert or update of username on users
+  for each row execute function prevent_shared_login_name();
+create or replace trigger principals_check_login_name before insert or update of admin_username on school_settings
+  for each row execute function prevent_shared_login_name();
+
+alter table parent_logins add column if not exists pin_encrypted text;
+alter table school_settings add column if not exists challan_profile jsonb;
+alter table licenses add column if not exists trial_expires_at timestamptz;
 `;

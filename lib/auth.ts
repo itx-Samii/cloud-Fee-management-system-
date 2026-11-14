@@ -4,12 +4,21 @@ import { decodeSession, SESSION_COOKIE, type Role, type Session } from './sessio
 import { DEFAULT_FEATURES, getFeatures, getLicenseStatus } from './license';
 import { FEATURES, featureOn, type FeatureKey } from './features';
 import { jsonError } from './http';
+import { staffSessionRevision } from './staffSessions';
+import { TRIAL_EXPIRED_MESSAGE } from './trials';
 
 export const ADMIN: Role[] = ['admin'];
 export const STAFF: Role[] = ['admin', 'accountant'];
 
 export async function getSession(): Promise<Session | null> {
-  return decodeSession((await cookies()).get(SESSION_COOKIE)?.value);
+  const session = decodeSession((await cookies()).get(SESSION_COOKIE)?.value);
+  if (!session || session.role === 'parent') return session;
+  if (!session.revision) return null;
+  try {
+    return session.revision === await staffSessionRevision(session.username) ? session : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -22,9 +31,10 @@ export async function requireSession(roles: Role[]): Promise<Session | NextRespo
   if (!roles.includes(session.role)) return jsonError('Access denied: your role cannot perform this action.', 403);
 
   if (session.role !== 'superadmin') {
-    // If the lookup itself fails, let the request through; the route will surface the database error.
-    const status = await getLicenseStatus(session.schoolId).catch(() => 'active');
+    const status = await getLicenseStatus(session.schoolId).catch(() => 'unavailable');
+    if (status === 'unavailable') return jsonError('Unable to verify school access. Please retry.', 503);
     if (status === 'blocked') return jsonError('This school license is blocked. Please contact your service provider.', 403);
+    if (status === 'expired') return jsonError(TRIAL_EXPIRED_MESSAGE, 403);
   }
   return session;
 }

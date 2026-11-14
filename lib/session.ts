@@ -2,18 +2,22 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 
 // Shared by proxy.ts and the route handlers, so it must not import next/headers.
 
-export type Role = 'superadmin' | 'admin' | 'accountant';
+/** 'parent' is a family signed in to the parent portal; its username is the family's phone number. */
+export type Role = 'superadmin' | 'admin' | 'accountant' | 'parent';
 
 export interface Session {
   username: string;
   role: Role;
   displayName: string;
   schoolId: string;
+  /** When the session was signed in (ms), so a parent PIN reset can end older sessions. */
+  issuedAt?: number;
+  revision?: string;
 }
 
 export const SESSION_COOKIE = 'school-session';
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
-const ROLES: Role[] = ['superadmin', 'admin', 'accountant'];
+const ROLES: Role[] = ['superadmin', 'admin', 'accountant', 'parent'];
 
 // No maxAge: the cookie dies with the browser, which matters on shared school PCs.
 export const sessionCookieOptions = {
@@ -36,7 +40,8 @@ function sign(payload: string): string {
 
 export function encodeSession(session: Session): string {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-  const payload = Buffer.from(JSON.stringify({ ...session, exp })).toString('base64url');
+  const { username, role, displayName, schoolId, revision } = session;
+  const payload = Buffer.from(JSON.stringify({ username, role, displayName, schoolId, revision, exp })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
@@ -59,6 +64,8 @@ export function decodeSession(token: string | undefined): Session | null {
       role: data.role,
       displayName: typeof data.displayName === 'string' ? data.displayName : data.username,
       schoolId: data.schoolId,
+      issuedAt: (data.exp - SESSION_TTL_SECONDS) * 1000,
+      ...(typeof data.revision === 'string' && { revision: data.revision }),
     };
   } catch {
     return null;

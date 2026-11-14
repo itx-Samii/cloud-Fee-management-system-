@@ -81,6 +81,19 @@ export function classLabel(cls: SchoolClass | undefined, classId: unknown): stri
   return cls ? `${cls.name}${cls.section ? ' - ' + cls.section : ''}` : `Class ${classId}`;
 }
 
+/** Fill display details for older vouchers that only recorded a student ID. */
+export function withVoucherStudent(voucher: FeeVoucher, student: Student | undefined, classes: Map<string, SchoolClass>): FeeVoucher {
+  if (voucher.studentName || !student) return voucher;
+  return {
+    ...voucher,
+    studentName: student.name,
+    fatherName: student.fatherName,
+    admissionNumber: student.admissionNumber,
+    className: classLabel(classes.get(String(student.classId)), student.classId),
+    classId: student.classId,
+  };
+}
+
 /** A new, unpaid voucher for one student and month, billing what the student is set up to pay. */
 export function newVoucher(student: Student, className: string, month: string, year: string, issued: Date, dueDate: Date) {
   const baseAmount = num(student.monthlyFee);

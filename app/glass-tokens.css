@@ -1,0 +1,49 @@
+/* Shared School Pay glass palette and surface tokens. */
+.welcome, .workspace {
+  --welcome-bg: #f3f4ff;
+  --welcome-text: #171735;
+  --welcome-muted: #4f4d6a;
+  --welcome-accent: #5031b8;
+  --welcome-primary: #5536c6;
+  --welcome-primary-hover: #44259f;
+  --welcome-on-primary: #fff;
+  --welcome-glass: rgba(255, 255, 255, .57);
+  --welcome-raised: rgba(249, 247, 255, .89);
+  --welcome-line: rgba(255, 255, 255, .84);
+  --welcome-rule: rgba(50, 32, 103, .13);
+  --welcome-shadow: 0 18px 55px -30px rgba(58, 32, 126, .38);
+  --welcome-depth: 0 35px 85px -38px rgba(54, 29, 113, .46);
+  --welcome-blue: #8798ff;
+  --welcome-violet: #c5a6ff;
+  --welcome-pink: #ffb7d8;
+  --welcome-success: #15634e;
+  --welcome-success-bg: rgba(72, 201, 149, .18);
+  --welcome-error: #a31b47;
+  --welcome-ease: cubic-bezier(.2, .8, .24, 1);
+  --welcome-width: 74rem;
+  --welcome-pad: clamp(1rem, 4vw, 3rem);
+  --welcome-blur: 16px;
+}
+
+:is([data-theme="dark"], [data-theme="ocean"], [data-theme="forest"], [data-theme="sunset"]) :is(.welcome, .workspace) {
+  --welcome-bg: #0c1027;
+  --welcome-text: #f4f3ff;
+  --welcome-muted: #c0bddb;
+  --welcome-accent: #c6b7ff;
+  --welcome-primary: #bda8ff;
+  --welcome-primary-hover: #d1c0ff;
+  --welcome-on-primary: #20103e;
+  --welcome-glass: rgba(24, 22, 52, .68);
+  --welcome-raised: rgba(32, 28, 63, .92);
+  --welcome-line: rgba(255, 255, 255, .18);
+  --welcome-rule: rgba(213, 204, 255, .16);
+  --welcome-shadow: 0 18px 58px -26px rgba(0, 0, 0, .72);
+  --welcome-depth: 0 36px 88px -37px rgba(0, 0, 0, .85);
+  --welcome-blue: #283f94;
+  --welcome-violet: #6238ab;
+  --welcome-pink: #9f4089;
+  --welcome-success: #9df2ce;
+  --welcome-success-bg: rgba(67, 208, 151, .17);
+  --welcome-error: #ffb0c6;
+  color-scheme: dark;
+}

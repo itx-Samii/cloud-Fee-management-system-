@@ -1,0 +1,76 @@
+/* Family fee cards put the latest issued challan ahead of account history. */
+.parent-portal-content { display: grid; gap: 1rem; }
+.parent-portal-content .workspace-portal-header { margin-bottom: 0; }
+.parent-brand, .parent-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; min-width: 0; }
+.parent-brand { flex-wrap: nowrap; }
+.parent-brand > div { min-width: 0; }
+.parent-brand h1, .parent-child h2 { overflow-wrap: anywhere; }
+.parent-overview, .parent-child, .parent-portal-message { padding: clamp(1rem, 3vw, 1.5rem); }
+.parent-overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+.parent-overview h2 { font-size: .9rem; color: var(--text-muted); }
+.parent-overview strong { display: block; margin: .25rem 0; font-size: clamp(1.65rem, 4vw, 2.6rem); line-height: 1.08; letter-spacing: -.06em; }
+.parent-overview p, .parent-refresh p { font-size: .82rem; color: var(--text-muted); }
+.parent-refresh { display: grid; justify-items: start; gap: .35rem; }
+.parent-portal-message .btn { margin-top: .65rem; }
+.parent-child-header, .parent-current-fee, .parent-history-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .75rem 1.25rem; }
+.parent-child-header h2 { font-size: clamp(1.16rem, 3vw, 1.5rem); }
+.parent-child-header p, .parent-history-row p { color: var(--text-muted); font-size: .83rem; }
+.parent-child-total, .parent-current-action > div { display: grid; gap: .2rem; }
+.parent-child-total span, .parent-current-action span { font-size: .76rem; color: var(--text-muted); }
+.parent-child-total strong, .parent-current-action strong { font-variant-numeric: tabular-nums; font-size: 1.1rem; }
+.parent-current-fee {
+  margin-top: 1rem;
+  padding: .95rem 1rem;
+  border-radius: .8rem;
+  border: 1px solid var(--border);
+  background: var(--primary-light);
+}
+.parent-current-fee h3 { margin: .2rem 0; font-size: 1.15rem; }
+.parent-current-fee p { font-size: .82rem; color: var(--text-muted); }
+.parent-current-fee .parent-current-label { color: var(--primary); font-weight: 650; }
+.parent-current-action { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem 1.25rem; }
+.parent-current-action .btn, .parent-history .btn { min-height: 2.75rem; }
+.parent-fee-empty, .parent-account-note { margin-top: .65rem; font-size: .83rem; color: var(--text-muted); }
+.parent-history { margin-top: .85rem; padding-top: .45rem; border-top: 1px solid var(--border); }
+.parent-history summary { cursor: pointer; font-size: .89rem; font-weight: 650; padding: .4rem 0; }
+.parent-history ul { list-style: none; }
+.parent-history-row { padding: .65rem 0; border-top: 1px solid var(--border); font-size: .88rem; }
+
+/* The preview uses the app palette. The document uses fixed inks and neutral paper. */
+.parent-challan-dialog {
+  width: min(42rem, calc(100% - 1rem));
+  max-height: calc(100dvh - 1rem);
+  margin: auto;
+  border: 1px solid var(--welcome-line);
+  border-radius: 1rem;
+  background: var(--welcome-raised);
+  color: var(--text-main);
+  box-shadow: var(--welcome-depth);
+}
+.parent-challan-dialog::backdrop { background: rgba(9, 7, 24, .62); backdrop-filter: blur(6px); }
+.parent-challan-toolbar { padding: .8rem 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem 1rem; }
+.parent-challan-toolbar h2 { font-size: 1.15rem; }
+.parent-challan-toolbar p { font-size: .8rem; color: var(--text-muted); }
+@media screen {
+  .parent-challan-dialog { width: min(76rem, calc(100% - 1rem)); }
+  .parent-challan-dialog .shared-challan {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: .75rem;
+  }
+  .parent-challan-dialog .shared-challan .voucher-copy { padding: .8rem; }
+  @media (max-width: 920px) {
+    .parent-challan-dialog { width: min(38rem, calc(100% - 1rem)); }
+    .parent-challan-dialog .shared-challan { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+    .parent-challan-dialog .shared-challan .voucher-copy { border: 1px solid #cbd5e1; }
+  }
+}
+@media (max-width: 560px) {
+  .parent-current-action { width: 100%; justify-content: space-between; }
+  .parent-challan-toolbar .parent-actions { width: 100%; }
+  .parent-challan-toolbar .parent-actions .btn:last-child { flex: 1; }
+}
+
+@media print {
+  .workspace-portal .portal-page, .parent-challan-print { margin: 0 !important; padding: 0 !important; animation: none !important; }
+}
